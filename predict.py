@@ -2,7 +2,7 @@ import torch
 from PIL import Image
 import argparse
 from config import *
-from data.transforms import val_img_transform
+from data_handlers.transforms import val_img_transform
 import importlib
 import numpy as np
 

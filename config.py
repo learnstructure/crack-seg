@@ -1,17 +1,17 @@
 import torch
-import os
+from pathlib import Path
 
 # Paths
-DATA_ROOT = "/path/to/CConCrack"  # Change to your dataset path
-TRAIN_IMG_DIR = os.path.join(DATA_ROOT, "Train", "images")
-TRAIN_MASK_DIR = os.path.join(DATA_ROOT, "Train", "masks")
-TEST_IMG_DIR = os.path.join(DATA_ROOT, "Test", "images")
-TEST_MASK_DIR = os.path.join(DATA_ROOT, "Test", "masks")
+DATA_ROOT = Path("CConCrack")  # Change to your dataset path
+TRAIN_IMG_DIR = DATA_ROOT / "Train" / "images"
+TRAIN_MASK_DIR = DATA_ROOT / "Train" / "masks"
+TEST_IMG_DIR = DATA_ROOT / "Test" / "images"
+TEST_MASK_DIR = DATA_ROOT / "Test" / "masks"
 
 # Training
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 8
-EPOCHS = 50
+EPOCHS = 1
 LEARNING_RATE = 1e-4
 NUM_WORKERS = 4
 PIN_MEMORY = True
@@ -30,5 +30,5 @@ LOSS = "dice"  # "dice", "bce", "combined"
 METRICS = ["iou", "dice"]
 
 # Checkpoints
-CHECKPOINT_DIR = "checkpoints"
-os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+CHECKPOINT_DIR = Path("checkpoints")
+CHECKPOINT_DIR.mkdir(exist_ok=True)

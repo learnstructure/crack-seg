@@ -3,8 +3,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import os
 from config import *
-from data.dataset import CrackDataset
-from data.transforms import val_img_transform, val_mask_transform
+from data_handlers.dataset import CrackDataset
+from data_handlers.transforms import val_img_transform, val_mask_transform
 from utils.metrics import iou_score, dice_coefficient
 import importlib
 
