@@ -2,7 +2,7 @@ import torch
 from pathlib import Path
 
 # Paths
-DATA_ROOT = Path("CConCrack")  # Change to your dataset path
+DATA_ROOT = Path("../CConCrack")  # Change to your dataset path
 TRAIN_IMG_DIR = DATA_ROOT / "Train" / "images"
 TRAIN_MASK_DIR = DATA_ROOT / "Train" / "masks"
 TEST_IMG_DIR = DATA_ROOT / "Test" / "images"

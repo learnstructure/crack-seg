@@ -1,8 +1,8 @@
 import torch
 from PIL import Image
 import argparse
-from config import *
-from data_handlers.transforms import val_img_transform
+from crack_seg.config import *
+from crack_seg.data_handlers.transforms import val_img_transform
 import importlib
 import numpy as np
 

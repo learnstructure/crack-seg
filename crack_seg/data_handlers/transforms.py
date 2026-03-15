@@ -1,5 +1,5 @@
 from torchvision import transforms
-from config import IMG_SIZE
+from crack_seg.config import IMG_SIZE
 
 # Transforms for training images
 train_img_transform = transforms.Compose(

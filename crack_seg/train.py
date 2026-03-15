@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import os
-from config import *
+from crack_seg.config import *
 from data_handlers.dataset import CrackDataset
 from data_handlers.transforms import (
     train_img_transform,
