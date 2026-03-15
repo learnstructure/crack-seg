@@ -25,7 +25,7 @@ def main():
     args = parser.parse_args()
 
     # Load model
-    model_module = importlib.import_module(f"models.{MODEL_NAME}")
+    model_module = importlib.import_module(f"crack_seg.models.{MODEL_NAME}")
     model = model_module.get_model().to(DEVICE)
     model.load_state_dict(torch.load(args.checkpoint, map_location=DEVICE))
     model.eval()

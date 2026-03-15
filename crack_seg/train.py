@@ -4,14 +4,14 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import os
 from crack_seg.config import *
-from data_handlers.dataset import CrackDataset
-from data_handlers.transforms import (
+from crack_seg.data_handlers.dataset import CrackDataset
+from crack_seg.data_handlers.transforms import (
     train_img_transform,
     train_mask_transform,
     val_img_transform,
     val_mask_transform,
 )
-from utils.metrics import DiceLoss, iou_score, dice_coefficient
+from crack_seg.utils.metrics import DiceLoss, iou_score, dice_coefficient
 import importlib
 
 
@@ -46,7 +46,7 @@ def main():
     )
 
     # Dynamically load model
-    model_module = importlib.import_module(f"models.{MODEL_NAME}")
+    model_module = importlib.import_module(f"crack_seg.models.{MODEL_NAME}")
     model = model_module.get_model().to(DEVICE)
 
     # Loss function

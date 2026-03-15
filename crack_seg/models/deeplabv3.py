@@ -1,4 +1,5 @@
 import segmentation_models_pytorch as smp
+from crack_seg.config import ENCODER_NAME, PRETRAINED, NUM_CLASSES
 
 
 def get_model():
