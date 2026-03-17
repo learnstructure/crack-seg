@@ -1,37 +1,29 @@
-from torchvision import transforms
+import torch
+from torchvision.transforms import v2
 from crack_seg.config import IMG_SIZE
 
-# Transforms for training images
-train_img_transform = transforms.Compose(
-    [
-        transforms.Resize(IMG_SIZE),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomVerticalFlip(p=0.5),
-        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ]
-)
+# --- Transforms for Training and Validation (expect image, mask) ---
 
-# Transforms for training masks (only spatial operations)
-train_mask_transform = transforms.Compose(
-    [
-        transforms.Resize(IMG_SIZE),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomVerticalFlip(p=0.5),
-        transforms.ToTensor(),  # Converts to [0,1] tensor
-    ]
-)
+train_transform = v2.Compose([
+    v2.Resize(IMG_SIZE),
+    v2.RandomHorizontalFlip(p=0.5),
+    v2.RandomVerticalFlip(p=0.5),
+    v2.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+    v2.ToImage(),
+    v2.ToDtype(torch.float32, scale=True),
+    v2.Lambda(lambda x: (
+    v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(x[0]),
+    x[1]
+))
+])
 
-# Validation/test transforms (no augmentation)
-val_img_transform = transforms.Compose(
-    [
-        transforms.Resize(IMG_SIZE),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ]
-)
+val_transform = v2.Compose([
+    v2.Resize(IMG_SIZE),
+    v2.ToImage(),
+    v2.ToDtype(torch.float32, scale=True),
+    v2.Lambda(lambda x: (
+    v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(x[0]),
+    x[1]
+))
+])
 
-val_mask_transform = transforms.Compose(
-    [transforms.Resize(IMG_SIZE), transforms.ToTensor()]
-)

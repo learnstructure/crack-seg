@@ -2,14 +2,14 @@ import torch
 from PIL import Image
 import argparse
 from crack_seg.config import *
-from crack_seg.data_handlers.transforms import val_img_transform
+from crack_seg.data_handlers.transforms import val_transform
 import importlib
 import numpy as np
 
 
 def predict(image_path, model, device):
     image = Image.open(image_path).convert("RGB")
-    input_tensor = val_img_transform(image).unsqueeze(0).to(device)
+    input_tensor = val_transform(image).unsqueeze(0).to(device)
     with torch.no_grad():
         output = model(input_tensor)
         pred = torch.sigmoid(output).cpu().numpy().squeeze()
@@ -39,3 +39,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+#run via command
+#python predict.py --image /path/to/image.jpg --checkpoint checkpoints/unet_best.pth

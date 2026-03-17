@@ -89,7 +89,7 @@ def display_prediction(image_path, model, device, transform, mask_dir=None, thre
     img_np = np.clip(img_np, 0, 1)
     
     # Plot
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    fig, axes = plt.subplots(1, 3, figsize=(10, 3))
     axes[0].imshow(img_np)
     axes[0].set_title("Original Image")
     axes[0].axis("off")

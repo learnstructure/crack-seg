@@ -4,7 +4,6 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 
-
 class CrackDataset(Dataset):
     def __init__(self, img_dir, mask_dir, transform=None, mask_transform=None):
         self.img_dir = img_dir
@@ -23,14 +22,13 @@ class CrackDataset(Dataset):
         image = Image.open(img_path).convert("RGB")
         mask = Image.open(mask_path).convert("L")  # Grayscale
 
-        # Apply transforms
         if self.transform:
-            image = self.transform(image)
-        if self.mask_transform:
-            mask = self.mask_transform(mask)
+            # The v2 transform takes both image and mask as input
+            image, mask = self.transform(image, mask)
         else:
-            # Default: convert to tensor and normalize to 0/1
+            # Basic fallback if no transform is provided
+            image = torch.from_numpy(np.array(image).transpose((2, 0, 1))).float() / 255.0
             mask = torch.from_numpy(np.array(mask)).float() / 255.0
-            mask = mask.unsqueeze(0)  # Add channel dimension [1, H, W]
+            mask = mask.unsqueeze(0)
 
         return image, mask

@@ -5,12 +5,7 @@ from tqdm import tqdm
 import os
 from crack_seg.config import *
 from crack_seg.data_handlers.dataset import CrackDataset
-from crack_seg.data_handlers.transforms import (
-    train_img_transform,
-    train_mask_transform,
-    val_img_transform,
-    val_mask_transform,
-)
+from crack_seg.data_handlers.transforms import train_transform, val_transform
 from crack_seg.utils.metrics import DiceLoss, iou_score, dice_coefficient
 import importlib
 
@@ -20,14 +15,12 @@ def main():
     train_dataset = CrackDataset(
         TRAIN_IMG_DIR,
         TRAIN_MASK_DIR,
-        transform=train_img_transform,
-        mask_transform=train_mask_transform,
+        transform=train_transform,
     )
     val_dataset = CrackDataset(
         TEST_IMG_DIR,
         TEST_MASK_DIR,  # Using test as validation for simplicity
-        transform=val_img_transform,
-        mask_transform=val_mask_transform,
+        transform=val_transform,
     )
 
     train_loader = DataLoader(

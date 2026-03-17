@@ -4,7 +4,7 @@ from tqdm import tqdm
 import os
 from crack_seg.config import *
 from crack_seg.data_handlers.dataset import CrackDataset
-from crack_seg.data_handlers.transforms import val_img_transform, val_mask_transform
+from crack_seg.data_handlers.transforms import val_transform
 from crack_seg.utils.metrics import iou_score, dice_coefficient
 import importlib
 
@@ -14,8 +14,7 @@ def main():
     test_dataset = CrackDataset(
         TEST_IMG_DIR,
         TEST_MASK_DIR,
-        transform=val_img_transform,
-        mask_transform=val_mask_transform,
+        transform=val_transform,
     )
     test_loader = DataLoader(
         test_dataset,
