@@ -11,7 +11,7 @@ TEST_MASK_DIR = DATA_ROOT / "Test" / "masks"
 # Training
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 8
-EPOCHS = 20
+EPOCHS = 1
 LEARNING_RATE = 1e-4
 NUM_WORKERS = 4
 PIN_MEMORY = True
