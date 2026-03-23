@@ -29,6 +29,14 @@ val_transform = v2.Compose([
     normalize_image
 ])
 
+test_transform = v2.Compose([
+    v2.Resize(IMG_SIZE),
+    v2.ToImage(),
+    v2.ToDtype(torch.float32, scale=True),
+    normalize_image
+])
+
+
 # --- Transform for Prediction (expect only image) ---
 pred_transform = v2.Compose([
     v2.Resize(IMG_SIZE),
