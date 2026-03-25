@@ -2,13 +2,12 @@
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import argparse
-import os
-import importlib
 import numpy as np
+import importlib
+
 from crack_seg.config import *
 from crack_seg.data_handlers.dataset import CrackDataset
-from crack_seg.data_handlers.transforms import test_transform
+from crack_seg.data_handlers.transforms import val_transform
 from crack_seg.utils.metrics import (
     iou_score, dice_coefficient, pixel_accuracy, 
     precision_score, recall_score, specificity_score
@@ -25,67 +24,44 @@ def evaluate(model, data_loader, device):
             outputs = model(images)
             preds = torch.sigmoid(outputs)
             
-            for pred, mask in zip(preds, masks):
-                metric_lists["iou"].append(iou_score(pred, mask).item())
-                metric_lists["dice"].append(dice_coefficient(pred, mask).item())
-                metric_lists["accuracy"].append(pixel_accuracy(pred, mask).item())
-                metric_lists["precision"].append(precision_score(pred, mask).item())
-                metric_lists["recall"].append(recall_score(pred, mask).item())
-                metric_lists["specificity"].append(specificity_score(pred, mask).item())
+            # Calculate metrics over the whole batch for efficiency
+            metric_lists["iou"].append(iou_score(preds, masks).item())
+            metric_lists["dice"].append(dice_coefficient(preds, masks).item())
+            metric_lists["accuracy"].append(pixel_accuracy(preds, masks).item())
+            metric_lists["precision"].append(precision_score(preds, masks).item())
+            metric_lists["recall"].append(recall_score(preds, masks).item())
+            metric_lists["specificity"].append(specificity_score(preds, masks).item())
 
     # Calculate mean of all metrics
     mean_metrics = {key: np.mean(values) for key, values in metric_lists.items()}
     return mean_metrics
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate a segmentation model on the test set.")
-    parser.add_argument(
-        "--checkpoint", 
-        type=str, 
-        required=True, 
-        help="Path to the model checkpoint file (e.g., checkpoints/unet_best.pth)"
-    )
-    args = parser.parse_args()
+    # Load model
+    model_module = importlib.import_module(f"crack_seg.models.{MODEL_NAME}")
+    model = model_module.get_model().to(DEVICE)
+    model.load_state_dict(torch.load(CHECKPOINT_DIR / f"{MODEL_NAME}_best.pth", map_location=DEVICE))
 
-    # Prepare test dataset
+    # Prepare dataset
     test_dataset = CrackDataset(
-        TEST_IMG_DIR, TEST_MASK_DIR, transform=test_transform
+        TEST_IMG_DIR,
+        TEST_MASK_DIR,
+        transform=val_transform,
     )
     test_loader = DataLoader(
         test_dataset, batch_size=BATCH_SIZE, shuffle=False,
         num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
     )
 
-    # Load model architecture dynamically
-    checkpoint_name = os.path.basename(args.checkpoint)
-    model_name_from_file = checkpoint_name.split('_')[0]
-    print(f"Loading model: {model_name_from_file}")
+    # Evaluate
+    test_metrics = evaluate(model, test_loader, DEVICE)
 
-    try:
-        model_module = importlib.import_module(f"crack_seg.models.{model_name_from_file}")
-        model = model_module.get_model().to(DEVICE)
-    except ImportError:
-        print(f"Error: Model '{model_name_from_file}' not found.")
-        return
-
-    # Load the trained weights
-    model.load_state_dict(torch.load(args.checkpoint, map_location=DEVICE))
-
-    # Evaluate the model
-    mean_metrics = evaluate(model, test_loader, DEVICE)
-    
     print("\n--- Test Set Evaluation ---")
-    print(f"Checkpoint: {args.checkpoint}")
-    print(f"Mean IoU: {mean_metrics['iou']:.4f}")
-    print(f"Mean Dice Coefficient: {mean_metrics['dice']:.4f}")
-    print(f"Pixel Accuracy: {mean_metrics['accuracy']:.4f}")
-    print(f"Precision: {mean_metrics['precision']:.4f}")
-    print(f"Recall (Sensitivity): {mean_metrics['recall']:.4f}")
-    print(f"Specificity: {mean_metrics['specificity']:.4f}")
-    print("---------------------------")
+    print(
+        f"Test Metrics -> IoU: {test_metrics['iou']:.4f}, Dice: {test_metrics['dice']:.4f}, "
+        f"Accuracy: {test_metrics['accuracy']:.4f}, Precision: {test_metrics['precision']:.4f}, "
+        f"Recall: {test_metrics['recall']:.4f}, Specificity: {test_metrics['specificity']:.4f}\n"
+    )
 
 if __name__ == "__main__":
-    torch.multiprocessing.freeze_support()
     main()
-
-#python -m crack_seg.test --checkpoint checkpoints/deeplabv3_best.pth

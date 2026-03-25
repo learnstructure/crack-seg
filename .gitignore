@@ -2,3 +2,40 @@ trash/
 CconCrack/
 rough.py
 checkpoints/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore virtual environments
+venv/
+.env/
+
+# Ignore setuptools build artifacts
+*.egg-info/
+dist/
+build/
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+
+# Project-specific
+.pytest_cache/
+checkpoints/
+*.pth
+
+# Setuptools
+*.egg-info/
+
+# Environment files
+environment_full.yml
+
+# IDE specific
+.vscode/
+.idea/
+

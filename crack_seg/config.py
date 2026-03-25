@@ -21,7 +21,7 @@ NUM_WORKERS = 4
 PIN_MEMORY = True
 
 # Model (change this to switch architectures)
-MODEL_NAME = "deeplabv3"  # Options: "unet", "deeplabv3", etc.
+MODEL_NAME = "unet"  # Options: "unet", "deeplabv3", etc.
 ENCODER_NAME = "resnet34"  # For models that use encoders
 PRETRAINED = True
 
