@@ -4,6 +4,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import numpy as np
 import importlib
+import argparse
+import os
 
 from crack_seg.config import *
 from crack_seg.data_handlers.dataset import CrackDataset
@@ -37,10 +39,37 @@ def evaluate(model, data_loader, device):
     return mean_metrics
 
 def main():
-    # Load model
-    model_module = importlib.import_module(f"crack_seg.models.{MODEL_NAME}")
-    model = model_module.get_model().to(DEVICE)
-    model.load_state_dict(torch.load(CHECKPOINT_DIR / f"{MODEL_NAME}_best.pth", map_location=DEVICE))
+    parser = argparse.ArgumentParser(description="Test a segmentation model.")
+    parser.add_argument("--checkpoint", type=str, default=None,
+                        help="Path to the model checkpoint to test. If not provided, uses the model from config.py.")
+    args = parser.parse_args()
+
+    if args.checkpoint:
+        # ---- Dynamically determine model name from checkpoint path ----
+        checkpoint_path = args.checkpoint
+        checkpoint_name = os.path.basename(checkpoint_path)
+        model_name = checkpoint_name.split('_')[0]
+        print(f"Loading model '{model_name}' from checkpoint: {checkpoint_path}")
+
+        # Load model dynamically
+        try:
+            model_module = importlib.import_module(f"crack_seg.models.{model_name}")
+            model = model_module.get_model().to(DEVICE)
+        except ImportError:
+            print(f"Error: Model '{model_name}' not found in crack_seg/models.")
+            return
+        
+        model.load_state_dict(torch.load(checkpoint_path, map_location=DEVICE))
+
+    else:
+        # ---- Load model from config file ----
+        model_name = MODEL_NAME
+        checkpoint_path = CHECKPOINT_DIR / f"{model_name}_best.pth"
+        print(f"Loading model '{model_name}' from config: {checkpoint_path}")
+
+        model_module = importlib.import_module(f"crack_seg.models.{model_name}")
+        model = model_module.get_model().to(DEVICE)
+        model.load_state_dict(torch.load(checkpoint_path, map_location=DEVICE))
 
     # Prepare dataset
     test_dataset = CrackDataset(
@@ -56,7 +85,7 @@ def main():
     # Evaluate
     test_metrics = evaluate(model, test_loader, DEVICE)
 
-    print("\n--- Test Set Evaluation ---")
+    print(f"\n--- Test Set Evaluation for {model_name.upper()} ---")
     print(
         f"Test Metrics -> IoU: {test_metrics['iou']:.4f}, Dice: {test_metrics['dice']:.4f}, "
         f"Accuracy: {test_metrics['accuracy']:.4f}, Precision: {test_metrics['precision']:.4f}, "

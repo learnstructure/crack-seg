@@ -1,6 +1,6 @@
 
 import segmentation_models_pytorch as smp
-from crack_seg.config import ENCODER_NAME, ENCODER_WEIGHTS, NUM_CLASSES
+from crack_seg.config import ENCODER_NAME, NUM_CLASSES, PRETRAINED
 
 def get_model():
     """
@@ -8,7 +8,7 @@ def get_model():
     """
     model = smp.UnetPlusPlus(
         encoder_name=ENCODER_NAME,
-        encoder_weights=ENCODER_WEIGHTS,
+        encoder_weights="imagenet" if PRETRAINED else None,
         in_channels=3,
         classes=NUM_CLASSES,
     )
