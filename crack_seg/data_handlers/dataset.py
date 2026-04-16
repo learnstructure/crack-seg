@@ -2,6 +2,7 @@ import os
 from PIL import Image
 import torch
 from torch.utils.data import Dataset
+from torchvision.tv_tensors import Mask
 import numpy as np
 
 class CrackDataset(Dataset):
@@ -21,6 +22,13 @@ class CrackDataset(Dataset):
 
         image = Image.open(img_path).convert("RGB")
         mask = Image.open(mask_path).convert("L")  # Grayscale
+        mask_array = np.array(mask)
+
+        # Fixed threshold to separate crack vs background
+        mask_bin = (mask_array >= 128).astype(np.float32)
+
+        mask = Mask(mask_bin)
+        mask = mask.unsqueeze(0)
 
         if self.transform:
             # The v2 transform takes both image and mask as input
@@ -29,6 +37,7 @@ class CrackDataset(Dataset):
             # Basic fallback if no transform is provided
             image = torch.from_numpy(np.array(image).transpose((2, 0, 1))).float() / 255.0
             mask = torch.from_numpy(np.array(mask)).float() / 255.0
+            mask = (mask > 128).float()
             mask = mask.unsqueeze(0)
 
         return image, mask

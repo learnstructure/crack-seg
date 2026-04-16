@@ -13,6 +13,7 @@ from crack_seg.utils.metrics import (
     pixel_accuracy, precision_score, recall_score, specificity_score
 )
 import importlib
+torch.cuda.empty_cache()
 
 def main():
     # Prepare datasets
@@ -56,14 +57,21 @@ def main():
         # --- Training ---
         model.train()
         train_loss = 0.0
-        for images, masks in tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} - Training"):
+        for batch_idx, (images, masks) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} - Training")):
             images, masks = images.to(DEVICE), masks.to(DEVICE)
+            
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, masks)
             loss.backward()
+            # Print memory summary for the first batch of each epoch
+            if batch_idx == 0:
+                # print(torch.cuda.memory_summary())
+                print(f"Allocated: {torch.cuda.memory_allocated()/1024**3:.2f} GB")
+                print(f"Reserved:  {torch.cuda.memory_reserved()/1024**3:.2f} GB")
             optimizer.step()
             train_loss += loss.item()
+            # print(images.shape, masks.shape, masks.min(), masks.max())
 
         train_loss /= len(train_loader)
 
@@ -112,4 +120,5 @@ def main():
 
 if __name__ == "__main__":
     torch.multiprocessing.freeze_support()
+    print(f"Using device: {DEVICE}")
     main()

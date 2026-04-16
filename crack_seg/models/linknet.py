@@ -1,12 +1,8 @@
-
 import segmentation_models_pytorch as smp
-from crack_seg.config import ENCODER_NAME, NUM_CLASSES, PRETRAINED
+from crack_seg.config import ENCODER_NAME, PRETRAINED, NUM_CLASSES
 
 def get_model():
-    """
-    Returns a U-Net++ model from the segmentation-models-pytorch library.
-    """
-    model = smp.UnetPlusPlus(
+    model = smp.LinkNet(
         encoder_name="mobilenet_v2",
         encoder_weights="imagenet",
         in_channels=3,

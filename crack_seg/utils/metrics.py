@@ -61,6 +61,9 @@ class DiceLoss(torch.nn.Module):
         Expects logits (before sigmoid) and binary targets.
         """
         preds = torch.sigmoid(logits)
-        intersection = (preds * targets).sum()
-        dice_score = (2. * intersection + self.smooth) / (preds.sum() + targets.sum() + self.smooth)
-        return 1. - dice_score
+        dims = (1, 2, 3)  # batch-wise computation
+        intersection = (preds * targets).sum(dim=dims)
+        dice_score = (2. * intersection + self.smooth) / (
+            preds.sum(dim=dims) + targets.sum(dim=dims) + self.smooth
+        )
+        return 1. - dice_score.mean()

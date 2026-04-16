@@ -53,4 +53,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-#python crack_seg/predict.py --image ./CConCrack/Test/images/CFD_001.jpg --checkpoint checkpoints/unet_best.pth
+#python -m crack_seg.predict --image ./CConCrack/Test/images/CFD_001.jpg --checkpoint checkpoints/unet_best.pth

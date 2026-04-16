@@ -2,10 +2,16 @@ import torch
 import torch.nn as nn
 
 class SegNet(nn.Module):
+    """
+    Faster SegNet implementation using bilinear upsampling + convolution
+    instead of MaxUnpool2d. This reduces memory overhead and speeds up
+    training while maintaining similar representational power.
+    """
     def __init__(self, in_channels=3, out_channels=1):
         super(SegNet, self).__init__()
 
-        # Encoder
+        # ---------- Encoder ----------
+        # Block 1
         self.enc_conv1 = nn.Sequential(
             nn.Conv2d(in_channels, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
@@ -14,8 +20,9 @@ class SegNet(nn.Module):
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
         )
-        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2, return_indices=True)
+        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
 
+        # Block 2
         self.enc_conv2 = nn.Sequential(
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
@@ -24,8 +31,9 @@ class SegNet(nn.Module):
             nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
         )
-        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2, return_indices=True)
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
 
+        # Block 3
         self.enc_conv3 = nn.Sequential(
             nn.Conv2d(128, 256, kernel_size=3, padding=1),
             nn.BatchNorm2d(256),
@@ -37,10 +45,11 @@ class SegNet(nn.Module):
             nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
         )
-        self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2, return_indices=True)
+        self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        # Decoder
-        self.unpool3 = nn.MaxUnpool2d(kernel_size=2, stride=2)
+        # ---------- Decoder (using bilinear upsampling + conv) ----------
+        # Upsample 1: from 256 to 256 (scale factor 2)
+        self.up3 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
         self.dec_conv3 = nn.Sequential(
             nn.Conv2d(256, 256, kernel_size=3, padding=1),
             nn.BatchNorm2d(256),
@@ -53,7 +62,8 @@ class SegNet(nn.Module):
             nn.ReLU(inplace=True),
         )
 
-        self.unpool2 = nn.MaxUnpool2d(kernel_size=2, stride=2)
+        # Upsample 2: from 128 to 128 (scale factor 2)
+        self.up2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
         self.dec_conv2 = nn.Sequential(
             nn.Conv2d(128, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
@@ -63,7 +73,8 @@ class SegNet(nn.Module):
             nn.ReLU(inplace=True),
         )
 
-        self.unpool1 = nn.MaxUnpool2d(kernel_size=2, stride=2)
+        # Upsample 3: from 64 to 64 (scale factor 2)
+        self.up1 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
         self.dec_conv1 = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
@@ -74,25 +85,26 @@ class SegNet(nn.Module):
     def forward(self, x):
         # Encoder
         x1 = self.enc_conv1(x)
-        x1_pooled, indices1 = self.pool1(x1)
+        x1_pooled = self.pool1(x1)
 
         x2 = self.enc_conv2(x1_pooled)
-        x2_pooled, indices2 = self.pool2(x2)
+        x2_pooled = self.pool2(x2)
 
         x3 = self.enc_conv3(x2_pooled)
-        x3_pooled, indices3 = self.pool3(x3)
+        x3_pooled = self.pool3(x3)
 
-        # Decoder
-        x3_unpooled = self.unpool3(x3_pooled, indices3)
-        x3 = self.dec_conv3(x3_unpooled)
+        # Decoder (bilinear upsampling)
+        x3_up = self.up3(x3_pooled)
+        x3 = self.dec_conv3(x3_up)
 
-        x2_unpooled = self.unpool2(x3, indices2)
-        x2 = self.dec_conv2(x2_unpooled)
+        x2_up = self.up2(x3)
+        x2 = self.dec_conv2(x2_up)
 
-        x1_unpooled = self.unpool1(x2, indices1)
-        x1 = self.dec_conv1(x1_unpooled)
+        x1_up = self.up1(x2)
+        x1 = self.dec_conv1(x1_up)
 
         return x1
 
 def get_model(in_channels=3, out_channels=1):
+    """Returns a SegNet model instance."""
     return SegNet(in_channels=in_channels, out_channels=out_channels)

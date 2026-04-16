@@ -94,3 +94,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+#command to run the test script with a specific checkpoint:
+# python -m crack_seg.test --checkpoint checkpoints/segnet_best.pth  

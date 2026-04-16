@@ -7,9 +7,10 @@ def get_model():
     Returns a DeepLabV3+ model from the segmentation-models-pytorch library.
     """
     model = smp.DeepLabV3Plus(
-        encoder_name=ENCODER_NAME,
-        encoder_weights="imagenet" if PRETRAINED else None,
+        encoder_name="resnet50",
+        encoder_weights="imagenet",
         in_channels=3,
         classes=NUM_CLASSES,
+        activation=None,
     )
     return model

@@ -3,7 +3,7 @@ from crack_seg.config import ENCODER_NAME, PRETRAINED, NUM_CLASSES
 
 
 def get_model():
-    model = smp.DeepLabV3Plus(
+    model = smp.DeepLabV3(
         encoder_name=ENCODER_NAME,
         encoder_weights="imagenet" if PRETRAINED else None,
         in_channels=3,

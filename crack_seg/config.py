@@ -9,19 +9,17 @@ VAL_IMG_DIR = DATA_ROOT / "Validation/images"
 VAL_MASK_DIR = DATA_ROOT / "Validation/masks"        
 TEST_IMG_DIR = DATA_ROOT / "Test" / "images"
 TEST_MASK_DIR = DATA_ROOT / "Test" / "masks"
-# TEST_IMG_DIR = DATA_ROOT / "Train" / "images"
-# TEST_MASK_DIR = DATA_ROOT / "Train" / "masks"
 
 # Training
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 8
-EPOCHS = 10
+EPOCHS = 20
 LEARNING_RATE = 1e-4
 NUM_WORKERS = 4
 PIN_MEMORY = True
 
 # Model (change this to switch architectures)
-MODEL_NAME = "unetplusplus"  # Options: "unet", "deeplabv3", etc.
+MODEL_NAME = "segformer"  # Options: "unet", "deeplabv3", etc.
 ENCODER_NAME = "resnet34"  # For models that use encoders
 PRETRAINED = True
 
