@@ -1,19 +1,25 @@
-
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import os
-import numpy as np # Import numpy for mean calculation
+import numpy as np
 from crack_seg.config import *
 from crack_seg.data_handlers.dataset import CrackDataset
 from crack_seg.data_handlers.transforms import train_transform, val_transform
 from crack_seg.utils.metrics import (
-    DiceLoss, iou_score, dice_coefficient, 
-    pixel_accuracy, precision_score, recall_score, specificity_score
+    DiceLoss,
+    iou_score,
+    dice_coefficient,
+    pixel_accuracy,
+    precision_score,
+    recall_score,
+    specificity_score,
 )
 import importlib
+
 torch.cuda.empty_cache()
+
 
 def main():
     # Prepare datasets
@@ -29,12 +35,18 @@ def main():
     )
 
     train_loader = DataLoader(
-        train_dataset, batch_size=BATCH_SIZE, shuffle=True,
-        num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
+        train_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=NUM_WORKERS,
+        pin_memory=PIN_MEMORY,
     )
     val_loader = DataLoader(
-        val_dataset, batch_size=BATCH_SIZE, shuffle=False,
-        num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
+        val_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=NUM_WORKERS,
+        pin_memory=PIN_MEMORY,
     )
 
     # Load model
@@ -57,9 +69,11 @@ def main():
         # --- Training ---
         model.train()
         train_loss = 0.0
-        for batch_idx, (images, masks) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} - Training")):
+        for batch_idx, (images, masks) in enumerate(
+            tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} - Training")
+        ):
             images, masks = images.to(DEVICE), masks.to(DEVICE)
-            
+
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, masks)
@@ -79,7 +93,14 @@ def main():
         model.eval()
         val_loss = 0.0
         # Initialize lists for all metrics
-        metric_lists = { "iou": [], "dice": [], "accuracy": [], "precision": [], "recall": [], "specificity": [] }
+        metric_lists = {
+            "iou": [],
+            "dice": [],
+            "accuracy": [],
+            "precision": [],
+            "recall": [],
+            "specificity": [],
+        }
 
         with torch.no_grad():
             for images, masks in tqdm(val_loader, desc="Validation"):
@@ -96,13 +117,17 @@ def main():
                     metric_lists["accuracy"].append(pixel_accuracy(pred, mask).item())
                     metric_lists["precision"].append(precision_score(pred, mask).item())
                     metric_lists["recall"].append(recall_score(pred, mask).item())
-                    metric_lists["specificity"].append(specificity_score(pred, mask).item())
+                    metric_lists["specificity"].append(
+                        specificity_score(pred, mask).item()
+                    )
 
         val_loss /= len(val_loader)
         # Calculate mean of all metrics
         mean_metrics = {key: np.mean(values) for key, values in metric_lists.items()}
 
-        print(f"\nEpoch {epoch+1}: Train Loss={train_loss:.4f}, Val Loss={val_loss:.4f}")
+        print(
+            f"\nEpoch {epoch+1}: Train Loss={train_loss:.4f}, Val Loss={val_loss:.4f}"
+        )
         print(
             f"Val Metrics -> IoU: {mean_metrics['iou']:.4f}, Dice: {mean_metrics['dice']:.4f}, "
             f"Accuracy: {mean_metrics['accuracy']:.4f}, Precision: {mean_metrics['precision']:.4f}, "
@@ -117,6 +142,7 @@ def main():
             save_path = os.path.join(CHECKPOINT_DIR, f"{MODEL_NAME}_best.pth")
             torch.save(model.state_dict(), save_path)
             print(f"Best model saved to {save_path} with val loss {val_loss:.4f}")
+
 
 if __name__ == "__main__":
     torch.multiprocessing.freeze_support()

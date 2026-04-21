@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
 
+
 class SegNet(nn.Module):
     """
     Faster SegNet implementation using bilinear upsampling + convolution
-    instead of MaxUnpool2d. This reduces memory overhead and speeds up
-    training while maintaining similar representational power.
+    instead of MaxUnpool2d.
     """
+
     def __init__(self, in_channels=3, out_channels=1):
         super(SegNet, self).__init__()
 
@@ -49,7 +50,7 @@ class SegNet(nn.Module):
 
         # ---------- Decoder (using bilinear upsampling + conv) ----------
         # Upsample 1: from 256 to 256 (scale factor 2)
-        self.up3 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
+        self.up3 = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
         self.dec_conv3 = nn.Sequential(
             nn.Conv2d(256, 256, kernel_size=3, padding=1),
             nn.BatchNorm2d(256),
@@ -63,7 +64,7 @@ class SegNet(nn.Module):
         )
 
         # Upsample 2: from 128 to 128 (scale factor 2)
-        self.up2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
+        self.up2 = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
         self.dec_conv2 = nn.Sequential(
             nn.Conv2d(128, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
@@ -74,7 +75,7 @@ class SegNet(nn.Module):
         )
 
         # Upsample 3: from 64 to 64 (scale factor 2)
-        self.up1 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
+        self.up1 = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
         self.dec_conv1 = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
@@ -104,6 +105,7 @@ class SegNet(nn.Module):
         x1 = self.dec_conv1(x1_up)
 
         return x1
+
 
 def get_model(in_channels=3, out_channels=1):
     """Returns a SegNet model instance."""

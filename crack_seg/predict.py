@@ -1,12 +1,14 @@
-
 import torch
 from PIL import Image
 import argparse
 from crack_seg.config import *
-from crack_seg.data_handlers.transforms import pred_transform # Use the dedicated prediction transform
+from crack_seg.data_handlers.transforms import (
+    pred_transform,
+)  # dedicated prediction transform
 import importlib
 import numpy as np
 import os
+
 
 def predict(image_path, model, device):
     image = Image.open(image_path).convert("RGB")
@@ -16,6 +18,7 @@ def predict(image_path, model, device):
         output = model(input_tensor)
         pred = torch.sigmoid(output).cpu().numpy().squeeze()
     return pred
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -27,13 +30,15 @@ def main():
 
     # ---- Dynamically determine model name from checkpoint path ----
     checkpoint_name = os.path.basename(args.checkpoint)
-    model_name_from_file = checkpoint_name.split('_')[0]
+    model_name_from_file = checkpoint_name.split("_")[0]
 
     print(f"Loading model: {model_name_from_file}")
 
     # Load model dynamically
     try:
-        model_module = importlib.import_module(f"crack_seg.models.{model_name_from_file}")
+        model_module = importlib.import_module(
+            f"crack_seg.models.{model_name_from_file}"
+        )
         model = model_module.get_model().to(DEVICE)
     except ImportError:
         print(f"Error: Model '{model_name_from_file}' not found in crack_seg/models.")
@@ -50,7 +55,8 @@ def main():
     result.save(output_filename)
     print(f"Prediction saved as {output_filename}")
 
+
 if __name__ == "__main__":
     main()
 
-#python -m crack_seg.predict --image ./CConCrack/Test/images/CFD_001.jpg --checkpoint checkpoints/unet_best.pth
+# python -m crack_seg.predict --image ./CConCrack/Test/images/CFD_001.jpg --checkpoint checkpoints/unet_best.pth
