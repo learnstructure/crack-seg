@@ -17,6 +17,7 @@ from crack_seg.utils.metrics import (
     specificity_score,
 )
 import importlib
+from crack_seg.utils.helpers import plot_loss_curve
 
 torch.cuda.empty_cache()
 
@@ -64,6 +65,9 @@ def main():
 
     best_val_loss = float("inf")
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+
+    train_losses = []
+    val_losses = []
 
     for epoch in range(EPOCHS):
         # --- Training ---
@@ -134,6 +138,9 @@ def main():
             f"Recall: {mean_metrics['recall']:.4f}, Specificity: {mean_metrics['specificity']:.4f}\n"
         )
 
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
+
         scheduler.step(val_loss)
 
         # Save best model
@@ -142,6 +149,10 @@ def main():
             save_path = os.path.join(CHECKPOINT_DIR, f"{MODEL_NAME}_best.pth")
             torch.save(model.state_dict(), save_path)
             print(f"Best model saved to {save_path} with val loss {val_loss:.4f}")
+
+    plot_save_path = os.path.join(CHECKPOINT_DIR, "loss_curve.png")
+    plot_loss_curve(train_losses, val_losses, save_path=plot_save_path)
+    print(f"Loss curve saved to {plot_save_path}")
 
 
 if __name__ == "__main__":

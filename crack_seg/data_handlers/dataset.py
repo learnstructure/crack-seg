@@ -36,7 +36,7 @@ class CrackDataset(Dataset):
         else:
             # Basic fallback if no transform is provided
             image = torch.from_numpy(np.array(image).transpose((2, 0, 1))).float() / 255.0
-            mask = torch.from_numpy(np.array(mask)).float() / 255.0
+            mask = torch.from_numpy(np.array(mask)).float()
             mask = (mask > 128).float()
             mask = mask.unsqueeze(0)
 
