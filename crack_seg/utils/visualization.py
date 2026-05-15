@@ -90,3 +90,74 @@ def display_prediction(image_path, model, device, transform, mask_dir=None, thre
 
     plt.tight_layout()
     plt.show()
+
+
+def compare_prediction(image_path, models, device, transform, mask_dir=None, threshold=0.5):
+    """
+    Display the original image, ground truth mask, and predicted masks from multiple models.
+
+    Args:
+        image_path: Path to the image file.
+        models: Dictionary of model name -> PyTorch model.
+        device: Device for model inference.
+        transform: Function that applies preprocessing to image and mask.
+        mask_dir: Optional directory containing ground truth masks.
+        threshold: Threshold for binarizing sigmoid outputs.
+    """
+    if not isinstance(models, dict):
+        raise TypeError("models must be a dict mapping model names to models")
+
+    model_items = list(models.items())
+    num_models = len(model_items)
+    if num_models == 0:
+        raise ValueError("models dict must contain at least one model")
+
+    # Load image
+    image = Image.open(image_path).convert("RGB")
+
+    # Infer mask path and load ground truth mask
+    img_path = Path(image_path)
+    if mask_dir is None:
+        mask_dir = img_path.parent.parent / "masks"
+    mask_path = Path(mask_dir) / img_path.name
+
+    if mask_path.exists():
+        mask = Image.open(mask_path).convert("L")
+    else:
+        print(f"Mask not found at {mask_path}, showing blank.")
+        mask = Image.fromarray(np.zeros((image.height, image.width), dtype=np.uint8))
+
+    original_image_for_display = np.array(image)
+    original_mask_for_display = np.array(mask) / 255.0
+
+    transformed_image, _ = transform(image, mask)
+    input_tensor = transformed_image.unsqueeze(0).to(device)
+
+    predictions = []
+    with torch.no_grad():
+        for name, model in model_items:
+            model.eval()
+            output = model(input_tensor)
+            pred = torch.sigmoid(output).cpu().squeeze()
+            predictions.append((name, (pred > threshold).float()))
+
+    ncols = 2 + num_models
+    fig, axes = plt.subplots(1, ncols, figsize=(4 * ncols, 4))
+    if ncols == 1:
+        axes = [axes]
+
+    axes[0].imshow(original_image_for_display)
+    axes[0].set_title("Original Image")
+    axes[0].axis("off")
+
+    axes[1].imshow(original_mask_for_display, cmap="gray", vmin=0, vmax=1)
+    axes[1].set_title("Ground Truth")
+    axes[1].axis("off")
+
+    for idx, (name, pred_bin) in enumerate(predictions, start=2):
+        axes[idx].imshow(pred_bin, cmap="gray", vmin=0, vmax=1)
+        axes[idx].set_title(f"{name}")
+        axes[idx].axis("off")
+
+    plt.tight_layout()
+    plt.show()

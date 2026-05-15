@@ -23,7 +23,9 @@ torch.cuda.empty_cache()
 
 
 def main():
-    # Prepare datasets
+    """Train and validate the segmentation model over multiple epochs."""
+
+    # Build training and validation datasets
     train_dataset = CrackDataset(
         TRAIN_IMG_DIR,
         TRAIN_MASK_DIR,
@@ -58,7 +60,7 @@ def main():
     criterion = DiceLoss() if LOSS == "dice" else nn.BCEWithLogitsLoss()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-    # Removed the verbose argument for compatibility
+    # Reduce learning rate when validation loss plateaus.
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", patience=5
     )
@@ -82,13 +84,14 @@ def main():
             outputs = model(images)
             loss = criterion(outputs, masks)
             loss.backward()
-            # Print memory summary for the first batch of each epoch
+            # Print first-batch memory stats for debug/monitoring.
             if batch_idx == 0:
                 # print(torch.cuda.memory_summary())
                 print(f"Allocated: {torch.cuda.memory_allocated()/1024**3:.2f} GB")
                 print(f"Reserved:  {torch.cuda.memory_reserved()/1024**3:.2f} GB")
             optimizer.step()
             train_loss += loss.item()
+            # Uncomment for shape/debug checks:
             # print(images.shape, masks.shape, masks.min(), masks.max())
 
         train_loss /= len(train_loader)
@@ -96,7 +99,6 @@ def main():
         # --- Validation ---
         model.eval()
         val_loss = 0.0
-        # Initialize lists for all metrics
         metric_lists = {
             "iou": [],
             "dice": [],
@@ -126,7 +128,7 @@ def main():
                     )
 
         val_loss /= len(val_loader)
-        # Calculate mean of all metrics
+        # Compute averages for validation metrics.
         mean_metrics = {key: np.mean(values) for key, values in metric_lists.items()}
 
         print(
@@ -143,7 +145,7 @@ def main():
 
         scheduler.step(val_loss)
 
-        # Save best model
+        # Save the model checkpoint when validation loss improves.
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             save_path = os.path.join(CHECKPOINT_DIR, f"{MODEL_NAME}_best.pth")
@@ -156,6 +158,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Required for Windows multiprocessing support.
     torch.multiprocessing.freeze_support()
     print(f"Using device: {DEVICE}")
     main()

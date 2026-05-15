@@ -4,13 +4,12 @@ from crack_seg.config import IMG_SIZE
 
 
 def normalize_image(image, mask):
-    """
-    Normalizes the image and returns both image and mask.
-    """
+    """Apply standard ImageNet normalization to the image tensor."""
     image = v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image)
     return image, mask
 
 
+# Training transform includes resizing, flips, color jitter, and normalization.
 train_transform = v2.Compose(
     [
         v2.Resize(IMG_SIZE),
@@ -23,6 +22,7 @@ train_transform = v2.Compose(
     ]
 )
 
+# Validation transform uses only resizing and normalization.
 val_transform = v2.Compose(
     [
         v2.Resize(IMG_SIZE),
@@ -32,6 +32,7 @@ val_transform = v2.Compose(
     ]
 )
 
+# Test transform mirrors validation preprocessing.
 test_transform = v2.Compose(
     [
         v2.Resize(IMG_SIZE),
@@ -41,7 +42,7 @@ test_transform = v2.Compose(
     ]
 )
 
-# --- Transform for Prediction (expect only image) ---
+# Prediction transform expects only an image and returns a normalized tensor.
 pred_transform = v2.Compose(
     [
         v2.Resize(IMG_SIZE),
