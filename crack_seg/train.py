@@ -1,12 +1,15 @@
+import importlib
+import os
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import os
-import numpy as np
-from crack_seg.config import *
-from crack_seg.data_handlers.dataset import CrackDataset
+
+from crack_seg import config
+from crack_seg.data_handlers.dataset_loaders import get_train_val_test_datasets
 from crack_seg.data_handlers.transforms import train_transform, val_transform
+from crack_seg.utils.helpers import plot_loss_curve
 from crack_seg.utils.metrics import (
     DiceLoss,
     iou_score,
@@ -16,83 +19,90 @@ from crack_seg.utils.metrics import (
     recall_score,
     specificity_score,
 )
-import importlib
-from crack_seg.utils.helpers import plot_loss_curve
 
-torch.cuda.empty_cache()
+if torch.cuda.is_available():
+    torch.cuda.empty_cache()
 
 
-def main():
-    """Train and validate the segmentation model over multiple epochs."""
+def train_pytorch():
+    """Train and validate standard PyTorch / SMP segmentation models."""
+    dataset_suffix = "_".join(config.DATASETS)
+    checkpoint_stem = f"{config.MODEL_NAME}_{dataset_suffix}"
 
-    # Build training and validation datasets
-    train_dataset = CrackDataset(
-        TRAIN_IMG_DIR,
-        TRAIN_MASK_DIR,
-        transform=train_transform,
-    )
-    val_dataset = CrackDataset(
-        VAL_IMG_DIR,
-        VAL_MASK_DIR,
-        transform=val_transform,
+    print(f"\n==========================================")
+    print(f"  Training Model: {config.MODEL_NAME.upper()}")
+    print(f"  Active Datasets: {config.DATASETS}")
+    print(f"  Device: {config.DEVICE}")
+    print(f"==========================================\n")
+
+    # Build multi-dataset training and validation sets
+    train_dataset, val_dataset, _ = get_train_val_test_datasets(
+        train_transform=train_transform,
+        val_transform=val_transform,
+        dataset_names=config.DATASETS,
+        data_root=config.DATA_ROOT,
+        train_ratio=config.TRAIN_RATIO,
+        val_ratio=config.VAL_RATIO,
+        test_ratio=config.TEST_RATIO,
+        seed=config.SPLIT_SEED,
+        stratified=config.STRATIFIED_SPLIT,
     )
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=BATCH_SIZE,
+        batch_size=config.BATCH_SIZE,
         shuffle=True,
-        num_workers=NUM_WORKERS,
-        pin_memory=PIN_MEMORY,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=config.PIN_MEMORY,
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=BATCH_SIZE,
+        batch_size=config.BATCH_SIZE,
         shuffle=False,
-        num_workers=NUM_WORKERS,
-        pin_memory=PIN_MEMORY,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=config.PIN_MEMORY,
     )
 
-    # Load model
-    model_module = importlib.import_module(f"crack_seg.models.{MODEL_NAME}")
-    model = model_module.get_model().to(DEVICE)
+    # Load model dynamically from crack_seg.models
+    model_module = importlib.import_module(f"crack_seg.models.{config.MODEL_NAME}")
+    model = model_module.get_model().to(config.DEVICE)
 
     # Loss function
-    criterion = DiceLoss() if LOSS == "dice" else nn.BCEWithLogitsLoss()
+    criterion = DiceLoss() if config.LOSS == "dice" else nn.BCEWithLogitsLoss()
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
     # Reduce learning rate when validation loss plateaus.
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", patience=5
     )
 
-    best_val_loss = float("inf")
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    lowest_val_loss = float("inf")
+    config.CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
 
     train_losses = []
     val_losses = []
 
-    for epoch in range(EPOCHS):
+    for epoch in range(config.EPOCHS):
         # --- Training ---
         model.train()
         train_loss = 0.0
         for batch_idx, (images, masks) in enumerate(
-            tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} - Training")
+            tqdm(train_loader, desc=f"Epoch {epoch+1}/{config.EPOCHS} - Training")
         ):
-            images, masks = images.to(DEVICE), masks.to(DEVICE)
+            images, masks = images.to(config.DEVICE), masks.to(config.DEVICE)
 
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, masks)
             loss.backward()
-            # Print first-batch memory stats for debug/monitoring.
-            if batch_idx == 0:
-                # print(torch.cuda.memory_summary())
+
+            # Print first-batch memory stats for GPU monitoring
+            if batch_idx == 0 and config.DEVICE.type == "cuda":
                 print(f"Allocated: {torch.cuda.memory_allocated()/1024**3:.2f} GB")
                 print(f"Reserved:  {torch.cuda.memory_reserved()/1024**3:.2f} GB")
+
             optimizer.step()
             train_loss += loss.item()
-            # Uncomment for shape/debug checks:
-            # print(images.shape, masks.shape, masks.min(), masks.max())
 
         train_loss /= len(train_loader)
 
@@ -110,7 +120,7 @@ def main():
 
         with torch.no_grad():
             for images, masks in tqdm(val_loader, desc="Validation"):
-                images, masks = images.to(DEVICE), masks.to(DEVICE)
+                images, masks = images.to(config.DEVICE), masks.to(config.DEVICE)
                 outputs = model(images)
                 loss = criterion(outputs, masks)
                 val_loss += loss.item()
@@ -128,8 +138,7 @@ def main():
                     )
 
         val_loss /= len(val_loader)
-        # Compute averages for validation metrics.
-        mean_metrics = {key: np.mean(values) for key, values in metric_lists.items()}
+        mean_metrics = {key: float(np.mean(values)) for key, values in metric_lists.items()}
 
         print(
             f"\nEpoch {epoch+1}: Train Loss={train_loss:.4f}, Val Loss={val_loss:.4f}"
@@ -145,20 +154,47 @@ def main():
 
         scheduler.step(val_loss)
 
-        # Save the model checkpoint when validation loss improves.
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            save_path = os.path.join(CHECKPOINT_DIR, f"{MODEL_NAME}_best.pth")
+        # Save model checkpoint when validation loss improves
+        if val_loss < lowest_val_loss:
+            lowest_val_loss = val_loss
+            save_path = config.CHECKPOINT_DIR / f"{checkpoint_stem}.pth"
             torch.save(model.state_dict(), save_path)
-            print(f"Best model saved to {save_path} with val loss {val_loss:.4f}")
+            print(f"Model saved to {save_path} with val loss {val_loss:.4f}")
 
-    plot_save_path = os.path.join(CHECKPOINT_DIR, "loss_curve.png")
+    plot_save_path = config.CHECKPOINT_DIR / f"{checkpoint_stem}_loss_curve.png"
     plot_loss_curve(train_losses, val_losses, save_path=plot_save_path)
     print(f"Loss curve saved to {plot_save_path}")
 
 
+def train_yolo_pipeline():
+    """Train YOLO segmentation models using the Ultralytics framework."""
+    from crack_seg.data_handlers.yolo_exporter import export_dataset_to_yolo
+    from crack_seg.models.yolo_seg import train_yolo
+
+    dataset_suffix = "_".join(config.DATASETS)
+
+    # Re-export on every run so dataset and split configuration cannot become stale.
+    export_dataset_to_yolo()
+
+    train_yolo(
+        data_yaml=config.YOLO_DATA_YAML,
+        weights=config.YOLO_MODEL_WEIGHTS,
+        epochs=config.EPOCHS,
+        batch_size=config.BATCH_SIZE,
+        imgsz=config.IMG_SIZE[0],
+        experiment_name=f"yolo_seg_{dataset_suffix}",
+    )
+
+
+def main():
+    if config.MODEL_NAME.lower().startswith("yolo"):
+        train_yolo_pipeline()
+    else:
+        train_pytorch()
+
+
 if __name__ == "__main__":
-    # Required for Windows multiprocessing support.
+    # Windows multiprocessing support
     torch.multiprocessing.freeze_support()
-    print(f"Using device: {DEVICE}")
     main()
+

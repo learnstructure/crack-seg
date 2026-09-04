@@ -1,162 +1,240 @@
-# Concrete Crack Surface Segmentation
+# Concrete Crack Surface Segmentation (`crack_seg`)
 
-## Description
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)]()
 
-This project implements deep learning models for automatic crack detection and segmentation in concrete surface images. It leverages semantic segmentation techniques to identify and delineate cracks, supporting infrastructure inspection, maintenance, and quality control in civil engineering. The project is built with PyTorch and supports multiple segmentation architectures for comparison and experimentation.
+A modular, extensible deep learning framework for semantic segmentation and detection of concrete cracks in civil infrastructure. Built with PyTorch, Segmentation Models PyTorch (SMP), and Ultralytics YOLO, supporting multi-dataset training, stratified splitting, comprehensive metric evaluation, and patch-based inference.
 
-## Features
+---
 
-- **Multiple Segmentation Models**: Support for popular architectures including UNet, DeepLabV3, DeepLabV3+, SegFormer, SegNet, UNet++, FPN, LinkNet, and PSPNet.
-- **Training and Evaluation**: Scripts for training models with validation, testing on held-out data, and comprehensive metrics (IoU, Dice, Pixel Accuracy, Precision, Recall, Specificity).
-- **Single-Image Prediction**: Inference on individual images with output masks.
-- **Visualization Tools**: Utilities for displaying predictions, overlays, and analysis.
-- **Post-Processing**: Crack analysis including length and width calculations.
-- **Dataset Support**: Built-in handling for the CConCrack dataset with proper transforms and data loading.
-- **Configurable**: Easy modification of models, hyperparameters, and paths via configuration file.
-- **GPU Optimized**: Efficient training with CUDA support, memory monitoring, and pinned memory.
+## 📌 Key Features
 
-## Installation
+- **Multi-Dataset Aggregation & Stratified Splitting**:
+  - Combine multiple benchmark crack datasets (e.g., **CConCrack**, **NCCD-PF_Dataset**, **DeepCrack**, **CRACK500**) seamlessly.
+  - Stratified, deterministic splitting ensuring balanced representation across **Train** (80%), **Validation** (10%), and **Test** (10%) splits without copying or duplicating gigabytes of files on disk.
+  - Automatic pairing of differing image/mask naming conventions (e.g. `image_X.jpg` <-> `mask_X.png`) and empty-mask filtering for pre-failure datasets (NCCD-PF).
 
-### Prerequisites
+- **Diverse Model Architectures**:
+  - **Standard PyTorch / SMP Semantic Segmentation**: UNet, DeepLabV3, DeepLabV3+, SegFormer (Mix Transformer), SegNet, UNet++, FPN, LinkNet, PSPNet with pre-trained backbones (ResNet, EfficientNet, MiT).
+  - **YOLO Segmentation (Ultralytics)**: Full support for YOLOv8-seg, YOLOv11-seg, etc., with automatic mask-to-polygon dataset export.
 
+- **Comprehensive Evaluation & Diagnostics**:
+  - Computes IoU (Jaccard Index), Dice Coefficient (F1-score), Pixel Accuracy, Precision, Recall, and Specificity.
+  - Supports combined multi-dataset testing as well as `--per-dataset` metric breakdowns to analyze generalization per domain.
+  - Class imbalance reporting tool to measure foreground crack pixel ratios.
+
+- **Inference on High-Resolution Images**:
+  - Direct full-image prediction.
+  - Overlapping sliding-window patch prediction (`--use-patches`) for ultra-high-resolution inspection images.
+
+---
+
+## 📂 Project Structure
+
+```
+crack-segmentation/
+├── data/                                 # Datasets root directory
+│   ├── CConCrack/                        # Train/Test images & masks
+│   ├── NCCD-PF_Dataset/                  # Pre-failure narrow crack dataset
+│   ├── DeepCrack/                        # DeepCrack train_img/train_lab, etc.
+│   └── CRACK500/                         # CRACK500 dataset
+└── crack-seg/                            # Main repository package
+    ├── checkpoints/                      # Saved .pth and .pt model checkpoints
+    ├── yolo_data/                        # Auto-generated YOLO polygon dataset & crack_data.yaml
+    ├── main.ipynb                        # Interactive exploration & demo notebook
+    ├── pyproject.toml                    # Package dependencies & configuration
+    └── crack_seg/                        # Source package
+        ├── config.py                     # Central configuration (datasets, model, hyperparameters)
+        ├── train.py                      # Unified training pipeline (PyTorch & YOLO)
+        ├── test.py                       # Evaluation script with per-dataset metric breakdowns
+        ├── predict.py                    # Inference script (standard and patch-based)
+        ├── data_handlers/
+        │   ├── dataset.py                # PyTorch CrackDataset class
+        │   ├── dataset_loaders.py        # Multi-dataset adapters, registry & stratified splitter
+        │   ├── transforms.py             # Data augmentations (torchvision v2)
+        │   ├── yolo_exporter.py          # Binary mask -> YOLO polygon txt converter
+        │   └── class_imbalance.py        # Dataset class imbalance calculation & diagnostics
+        ├── models/
+        │   ├── unet.py                   # UNet (SMP)
+        │   ├── deeplabv3.py              # DeepLabV3 (SMP)
+        │   ├── deeplabv3plus.py          # DeepLabV3+ (SMP)
+        │   ├── segformer.py              # SegFormer (MiT backbone)
+        │   ├── segnet.py                 # SegNet implementation
+        │   ├── unetplusplus.py           # UNet++ (SMP)
+        │   ├── fpn.py, linknet.py...     # FPN, LinkNet, PSPNet
+        │   └── yolo_seg.py               # Ultralytics YOLO segmentation wrapper
+        └── utils/
+            ├── helpers.py                # Loss plotting & general utilities
+            ├── metrics.py                # Loss functions & evaluation metrics
+            ├── post_processing.py        # Crack length/width estimation
+            └── visualization.py          # Mask overlays & visual diagnostics
+```
+
+---
+
+## 🚀 Installation
+
+### 1. Prerequisites
 - Python >= 3.8
-- GPU with CUDA support recommended for training (optional for inference)
+- CUDA-capable GPU recommended for training
 
-### Using pip
-
-Clone the repository and install dependencies:
-
+### 2. Conda Environment Setup
 ```bash
+# Clone the repository
 git clone <repository-url>
-cd crack-seg
+cd crack-segmentation/crack-seg
+
+# Activate your Conda environment (example: structeng or crack-seg)
+conda activate structeng
+
+# Install crack_seg in editable mode with YOLO support
+pip install -e ".[yolo]"
+```
+
+Or install core dependencies directly:
+```bash
 pip install -e .
+pip install ultralytics opencv-python  # Required for YOLO segmentation
 ```
 
-### Using Conda
+---
 
-Alternatively, use the provided Conda environment:
+## ⚙️ Configuration (`crack_seg/config.py`)
+
+All global parameters are managed in `crack_seg/config.py`:
+
+```python
+# Select active datasets to combine
+DATASETS = ["CConCrack", "NCCD-PF_Dataset"]
+
+# Split configuration
+TRAIN_RATIO = 0.8
+VAL_RATIO = 0.1
+TEST_RATIO = 0.1
+SPLIT_SEED = 42
+STRATIFIED_SPLIT = True
+
+# Model architecture selection
+# Options: "unet", "deeplabv3", "deeplabv3plus", "segformer", "segnet", "unetplusplus", "fpn", "linknet", "pspnet", "yolo_seg"
+MODEL_NAME = "unet"
+ENCODER_NAME = "resnet34"
+
+# YOLO settings
+YOLO_MODEL_WEIGHTS = "yolov8n-seg.pt"  # or "yolo11n-seg.pt", "yolov8s-seg.pt"
+
+# Training parameters
+BATCH_SIZE = 4
+EPOCHS = 50
+LEARNING_RATE = 1e-4
+IMG_SIZE = (448, 448)
+```
+
+---
+
+## 📖 Usage Guide
+
+### 1. Inspect Datasets & Class Imbalance
+Verify dataset pairings, view split numbers, and inspect foreground crack ratios:
 
 ```bash
-conda env create -f environment.yml
-conda activate crack-seg
+# Inspect dataset discovery and sample counts per split:
+python -m crack_seg.data_handlers.dataset_loaders
+
+# Compute class imbalance report for the active training split:
+python -m crack_seg.data_handlers.class_imbalance
 ```
 
-For a full environment with additional tools:
+---
 
-```bash
-conda env create -f environment_full.yml
-```
+### 2. Training
 
-## Usage
-
-### Training
-
-To train a segmentation model:
-
-1. Modify `crack_seg/config.py` to select the model (e.g., set `MODEL_NAME = "unet"`) and adjust parameters as needed.
-2. Ensure the dataset is placed in the `CConCrack/` directory.
-3. Run the training script:
-
+#### A. Training PyTorch / SMP Segmentation Models
+Set `MODEL_NAME = "unet"` (or any SMP model) in `config.py`, then run:
 ```bash
 python -m crack_seg.train
 ```
+- Trains with the configured loss (`dice` or `bce`), validates each epoch, and saves the selected checkpoint to `checkpoints/{MODEL_NAME}_{DATASET}.pth`.
+- Generates a training and validation loss curve at `checkpoints/{MODEL_NAME}_{DATASET}_loss_curve.png`.
 
-This will train for 50 epochs by default, validate after each epoch, and save the best model to `checkpoints/{MODEL_NAME}_best.pth`.
-
-### Testing
-
-To evaluate a trained model on the test set:
-
+#### B. Training YOLO Segmentation Models
+Set `MODEL_NAME = "yolo_seg"` in `config.py`, then run:
 ```bash
-python -m crack_seg.test --checkpoint checkpoints/unet_best.pth
+python -m crack_seg.train
+```
+- Automatically exports the multi-dataset into normalized polygon annotations in `yolo_data/` and runs the Ultralytics YOLO segmentation training pipeline. Checkpoints are saved under `checkpoints/yolo_runs/`.
+
+---
+
+### 3. Evaluation & Testing
+
+#### Evaluating on Combined Test Set
+```bash
+# Evaluate PyTorch model:
+python -m crack_seg.test --model unet --checkpoint checkpoints/unet_NCCD-PF_Dataset.pth
+
+# Evaluate YOLO model:
+python -m crack_seg.test --checkpoint checkpoints/yolo_runs/yolo_seg_NCCD-PF_Dataset.pt
 ```
 
-This outputs mean metrics (IoU, Dice, etc.) for the test set. If no checkpoint is specified, it uses the default from config.
-
-### Prediction
-
-To perform inference on a single image:
-
+#### Evaluating with Per-Dataset Breakdown
+View model performance separated across individual datasets to measure cross-domain generalization:
 ```bash
-python -m crack_seg.predict --image ./CConCrack/Test/images/CFD_001.jpg --checkpoint checkpoints/unet_best.pth
+python -m crack_seg.test --model unet --checkpoint checkpoints/unet_NCCD-PF_Dataset.pth --per-dataset
 ```
 
-This saves the predicted binary mask as `{image_name}_prediction.png` in the current directory.
+Output example:
+```
+--- Combined Test Set Evaluation for UNET ---
+Test Metrics -> IoU: 0.7642, Dice: 0.8663, Accuracy: 0.9851, Precision: 0.8812, Recall: 0.8520
 
-## Models
+--- Per-Dataset Breakdown ---
+[CConCrack]       (N=44)  -> IoU: 0.7910, Dice: 0.8833, Accuracy: 0.9880, Precision: 0.8950, Recall: 0.8720
+[NCCD-PF_Dataset] (N=69)  -> IoU: 0.7470, Dice: 0.8550, Accuracy: 0.9832, Precision: 0.8720, Recall: 0.8390
+```
 
-The project supports dynamic loading of segmentation models. Select a model by setting `MODEL_NAME` in `crack_seg/config.py`. Available models include:
+---
 
-- **UNet**: Classic encoder-decoder architecture from segmentation-models-pytorch (SMP).
-- **DeepLabV3**: Uses atrous convolution for multi-scale context (SMP).
-- **DeepLabV3+**: Improved version with an additional decoder (SMP).
-- **SegFormer**: Transformer-based model with Mix Transformer encoder (SMP).
-- **SegNet**: Custom PyTorch implementation with encoder-decoder and bilinear upsampling.
-- **UNet++**: Nested U-Net with dense skip connections (SMP).
-- **FPN**: Feature Pyramid Network (SMP).
-- **LinkNet**: Lightweight encoder-decoder (SMP).
-- **PSPNet**: Pyramid Scene Parsing Network (SMP).
+### 4. Single-Image Prediction & Inference
 
-All models use pre-trained encoders (e.g., ResNet34, EfficientNet-B3) and output logits for binary segmentation.
+```bash
+# Inference with a PyTorch checkpoint:
+python -m crack_seg.predict --image path/to/image.jpg --model unet --checkpoint checkpoints/unet_NCCD-PF_Dataset.pth
 
-## Dataset
+# Patch-based sliding window inference for large images:
+python -m crack_seg.predict --image path/to/large_image.jpg --model unet --checkpoint checkpoints/unet_NCCD-PF_Dataset.pth --use-patches --patch-size 448 --stride 224
 
-The project uses the CConCrack dataset for concrete crack segmentation:
+# Inference with a YOLO segmentation checkpoint:
+python -m crack_seg.predict --image path/to/image.jpg --checkpoint checkpoints/yolo_runs/yolo_seg_NCCD-PF_Dataset.pt
+```
 
-- **Structure**: Organized into `Train/`, `Validation/`, and `Test/` directories, each containing `images/` and `masks/` subdirectories.
-- **Format**: Images are RGB, masks are grayscale (binary after thresholding at 128).
-- **Transforms**: Training includes resizing (448x448), random flips, color jitter, and normalization. Validation/Test use resize and normalization only.
-- **Loading**: PyTorch DataLoader with batch size 8, 4 workers, and pinned memory for efficiency.
+Predictions are saved as binary masks (e.g. `{image_name}_prediction.png`).
 
-Place the dataset in the `CConCrack/` directory at the project root.
+---
 
-## Configuration
+## 📊 Supported Models
 
-Key settings are defined in `crack_seg/config.py`:
+| Architecture | Model Key in Config | Framework | Default Backbone |
+| :--- | :--- | :--- | :--- |
+| **UNet** | `unet` | SMP | ResNet-34 / ResNet-101 |
+| **DeepLabV3** | `deeplabv3` | SMP | ResNet-34 |
+| **DeepLabV3+** | `deeplabv3plus`| SMP | ResNet-34 |
+| **SegFormer** | `segformer` | SMP | MiT-B2 |
+| **UNet++** | `unetplusplus` | SMP | ResNet-34 |
+| **FPN** | `fpn` | SMP | ResNet-34 |
+| **LinkNet** | `linknet` | SMP | ResNet-34 |
+| **PSPNet** | `pspnet` | SMP | ResNet-34 |
+| **SegNet** | `segnet` | Custom PyTorch | VGG-style Encoder |
+| **YOLOv8-seg**| `yolo_seg` | Ultralytics | `yolov8n-seg.pt` |
+| **YOLOv11-seg**| `yolo_seg` | Ultralytics | `yolo11n-seg.pt` |
 
-- **Paths**: Dataset root (`CConCrack`), train/val/test image/mask directories.
-- **Model**: Name (e.g., "unet"), encoder (e.g., "resnet34"), pre-trained flag.
-- **Training**: Device ("cuda" if available), batch size (8), epochs (50), learning rate (1e-4), workers (4).
-- **Data**: Image size (448x448), number of classes (1 for binary).
-- **Loss/Metrics**: Loss function ("dice"), metrics list (["iou", "dice", "accuracy", "precision", "recall", "specificity"]).
-- **Checkpoints**: Save directory (`checkpoints/`).
+---
 
-Modify this file to customize experiments.
+## 📄 License
 
-## Dependencies
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-Core dependencies (from `pyproject.toml`):
-
-- `torch`: Deep learning framework.
-- `segmentation-models-pytorch`: Pre-built segmentation models.
-- `numpy`: Numerical computations.
-- `Pillow`: Image processing.
-- `matplotlib`: Visualization.
-- `tqdm`: Progress bars.
-
-Development dependencies include `pytest`, `black`, and `flake8`.
-
-## Demo
-
-For interactive exploration, open `main.ipynb` in Jupyter Notebook. It includes:
-
-- GPU availability checks.
-- Model loading and prediction examples.
-- Visualization of results.
-
-## Checkpoints
-
-Pre-trained models are available in `checkpoints/`:
-
-- `unet_best.pth`
-- `segnet_best.pth`
-- `deeplabv3_best.pth`
-- `deeplabv3plus_best.pth`
-- `segformer_best.pth`
-- `unetplusplus_best.pth`
-- And others.
-
-Use these for testing or as starting points for fine-tuning.
 
 
 

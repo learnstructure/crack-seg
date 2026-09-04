@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crack_seg"
-version = "0.1.0"
+version = "0.2.0"
 description = "Concrete crack surface segmentation"
 authors = [{name = "Abinash Mandal", email = "abinashmandal33486@gmail.com"}]
 license = {text = "MIT"}
@@ -22,6 +22,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "black", "flake8"]
+yolo = ["ultralytics", "opencv-python"]
+
 
 [tool.setuptools.packages.find]
 where = ["."]

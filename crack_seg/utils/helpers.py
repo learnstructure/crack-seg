@@ -14,10 +14,17 @@ def load_model(model_name: str, checkpoint_path: str | Path, device=DEVICE):
 
     return model
 
-def load_model_from_checkpoint(checkpoint_path: str | Path, device=DEVICE):
-    """Infer the model name from checkpoint filename and load it."""
+def load_model_from_checkpoint(
+    checkpoint_path: str | Path,
+    model_name: str,
+    device=DEVICE,
+):
+    """Load a PyTorch checkpoint using an explicitly supplied model name."""
     checkpoint_path = Path(checkpoint_path)
-    model_name = checkpoint_path.stem.split("_")[0]
+    if not model_name:
+        raise ValueError(
+            "model_name is required because checkpoint filenames may include dataset names."
+        )
     return load_model(model_name, checkpoint_path, device)
 
 

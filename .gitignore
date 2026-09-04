@@ -39,3 +39,6 @@ environment_full.yml
 .vscode/
 .idea/
 
+README.pdf
+
+*.pt
