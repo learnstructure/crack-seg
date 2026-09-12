@@ -44,18 +44,31 @@ class CrackDataset(Dataset):
         self.threshold = threshold
 
         if samples is not None:
+            if len(samples) == 0:
+                raise ValueError("CrackDataset initialized with an empty 'samples' list.")
             self.samples = [(Path(img), Path(mask)) for img, mask in samples]
         elif img_dir is not None and mask_dir is not None:
             img_dir_path = Path(img_dir)
             mask_dir_path = Path(mask_dir)
+            if not img_dir_path.exists():
+                raise FileNotFoundError(f"Image directory not found: {img_dir_path}")
+            if not mask_dir_path.exists():
+                raise FileNotFoundError(f"Mask directory not found: {mask_dir_path}")
+
             images = sorted(os.listdir(img_dir_path))
-            self.samples = [
-                (img_dir_path / img_name, mask_dir_path / img_name)
-                for img_name in images
-            ]
+            if not images:
+                raise ValueError(f"No images found in image directory: {img_dir_path}")
+
+            self.samples = []
+            for img_name in images:
+                img_p = img_dir_path / img_name
+                mask_p = mask_dir_path / img_name
+                if not mask_p.exists():
+                    raise FileNotFoundError(f"Matching mask not found for image: {img_p} -> {mask_p}")
+                self.samples.append((img_p, mask_p))
         else:
             raise ValueError(
-                "Either 'samples' list or both 'img_dir' and 'mask_dir' must be provided."
+                "Either non-empty 'samples' list or both 'img_dir' and 'mask_dir' must be provided."
             )
 
     def __len__(self):

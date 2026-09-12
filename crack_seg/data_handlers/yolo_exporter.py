@@ -80,6 +80,9 @@ def export_split_to_yolo(
     """
     Export a single split (train, val, or test) to YOLO segmentation format.
     """
+    if not samples:
+        raise ValueError(f"Cannot export empty split '{split_name}' to YOLO format.")
+
     images_dir = output_dir / "images" / split_name
     labels_dir = output_dir / "labels" / split_name
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -91,6 +94,11 @@ def export_split_to_yolo(
     ):
         img_p = Path(img_path)
         mask_p = Path(mask_path)
+
+        if not img_p.exists():
+            raise FileNotFoundError(f"Image not found during YOLO export: {img_p}")
+        if not mask_p.exists():
+            raise FileNotFoundError(f"Mask not found during YOLO export: {mask_p}")
 
         # Unique name prefix in case different datasets have overlapping filenames
         unique_stem = f"{img_p.parent.parent.stem}_{img_p.stem}"
@@ -111,8 +119,9 @@ def export_split_to_yolo(
                 mask_arr = np.array(mask_img)
             polygons = mask_to_yolo_polygons(mask_arr, threshold=threshold)
         except Exception as e:
-            print(f"Warning: Failed to process mask {mask_p}: {e}")
-            polygons = []
+            raise RuntimeError(
+                f"Failed to process mask {mask_p} for image {img_p}: {e}"
+            ) from e
 
         # Write label txt file
         with open(dest_label_path, "w", encoding="utf-8") as f:

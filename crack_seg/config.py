@@ -11,8 +11,10 @@ DATA_ROOT = WORKSPACE_DIR / "data"
 
 # Active Datasets to combine for training, validation, and testing
 # Supported: "CConCrack", "NCCD-PF_Dataset", "DeepCrack", "CRACK500"
+
+# DATASETS = ["NCCD-PF_Dataset"]
 # DATASETS = ["CConCrack", "NCCD-PF_Dataset"]
-DATASETS = ["NCCD-PF_Dataset"]
+DATASETS = ["CConCrack", "NCCD-PF_Dataset", "DeepCrack", "CRACK500"]
 
 # NCCD-PF specific: set True to use only images with cracks (recommended), or False for all images
 NCCD_CRACKED_ONLY = True

@@ -1,44 +1,66 @@
+# ==============================================================================
+# Generated Data & Datasets
+# ==============================================================================
+yolo_data/
+data/
+scratch/
 trash/
-CconCrack/
 rough.py
+CconCrack/
+
+# ==============================================================================
+# Model Weights & Training Checkpoints
+# ==============================================================================
 checkpoints/
-
-# Ignore Python cache files
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Ignore virtual environments
-venv/
-.env/
-
-# Ignore setuptools build artifacts
-*.egg-info/
-dist/
-build/
-
-# C extensions
-*.so
-
-# Distribution / packaging
-.Python
-
-# Project-specific
-.pytest_cache/
-checkpoints/
+weights/
+runs/
+yolo_runs/
 *.pth
+*.pt
+*.onnx
 
-# Setuptools
+# ==============================================================================
+# Prediction & Plot Outputs
+# ==============================================================================
+*_prediction.png
+*_loss_curve.png
+prediction_results/
+
+# ==============================================================================
+# Jupyter Notebooks
+# ==============================================================================
+.ipynb_checkpoints/
+
+# ==============================================================================
+# Python Bytecode & Packaging Artifacts
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
 *.egg-info/
+.pytest_cache/
 
-# Environment files
+# ==============================================================================
+# Virtual Environments & Configuration
+# ==============================================================================
+venv/
+.venv/
+env/
+.env/
 environment_full.yml
 
-# IDE specific
+# ==============================================================================
+# IDE & OS Specific Files
+# ==============================================================================
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db
+ehthumbs.db
 
+# Large documentation exports
 README.pdf
-
-*.pt

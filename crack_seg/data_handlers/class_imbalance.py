@@ -55,6 +55,11 @@ def compute_crack_pixel_proportion(
         paths = [mask_p for _, mask_p in train_ds.samples]
         source_desc = f"active multi-dataset training split ({config.DATASETS})"
 
+    if not paths:
+        raise ValueError(
+            f"No mask paths found to compute class imbalance for: {source_desc}"
+        )
+
     total_crack_pixels = 0
     total_pixels = 0
     total_images = 0

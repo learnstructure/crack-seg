@@ -3,7 +3,6 @@ import re
 import random
 from pathlib import Path
 from typing import Dict, List, Tuple, Union, Optional, Sequence
-from collections import defaultdict
 from PIL import Image
 import numpy as np
 
@@ -48,6 +47,9 @@ def load_cconcrack(dataset_dir: Union[str, Path]) -> List[Tuple[Path, Path]]:
                 if img_path.stem in mask_map:
                     pairs.append((img_path, mask_map[img_path.stem]))
 
+    if not pairs:
+        raise FileNotFoundError(f"No valid image/mask pairs found for CConCrack in: {dataset_dir}")
+
     return pairs
 
 
@@ -66,13 +68,20 @@ def _load_image_mask_dirs(
         for path in mask_dir.iterdir()
         if path.is_file() and _is_image_file(path)
     }
-    return [
+    pairs = [
         (image_path, mask_map[image_path.stem])
         for image_path in sorted(image_dir.iterdir())
         if image_path.is_file()
         and _is_image_file(image_path)
         and image_path.stem in mask_map
     ]
+    if not pairs:
+        raise FileNotFoundError(
+            f"No paired image/mask files found.\n"
+            f"  image_dir : {image_dir} (exists={image_dir.exists()})\n"
+            f"  mask_dir  : {mask_dir} (exists={mask_dir.exists()})"
+        )
+    return pairs
 
 
 def load_dataset_partitions(
@@ -115,26 +124,33 @@ def load_dataset_partitions(
             "test": ("testdata", "testcrop"),
         }.items():
             for folder_name in folder_names:
-                folder = dataset_path / folder_name
-                if not folder.exists():
+                # Resolve nested same-name subdirectory (e.g. traindata/traindata/)
+                folder = _resolve_crack500_folder(dataset_path, folder_name)
+                if folder is None:
                     continue
-                for image_path in sorted(folder.iterdir()):
-                    if not image_path.is_file() or not _is_image_file(image_path) or image_path.stem.endswith("_mask"):
-                        continue
+                # In CRACK500, input photos are .jpg/.jpeg/.JPG; masks are .png
+                image_files = [
+                    f for f in sorted(folder.iterdir())
+                    if f.is_file() and f.suffix.lower() in [".jpg", ".jpeg"] and not f.stem.endswith("_mask")
+                ]
+                for image_path in image_files:
                     mask_path = next(
                         (
                             candidate
                             for candidate in (
                                 folder / f"{image_path.stem}_mask.png",
                                 folder / f"{image_path.stem}.png",
-                                folder / f"{image_path.stem}.jpg",
                             )
-                            if candidate.exists() and candidate != image_path
+                            if candidate.exists()
                         ),
                         None,
                     )
                     if mask_path is not None:
                         partitions[partition].append((image_path, mask_path))
+                    else:
+                        raise FileNotFoundError(
+                            f"Missing matching mask for CRACK500 image: {image_path}"
+                        )
     else:
         partitions = {"all": load_dataset_by_name(dataset_name, data_root=data_root, **kwargs)}
 
@@ -200,6 +216,9 @@ def load_nccd_pf(
 
                 pairs.append((img_path, mask_path))
 
+    if not pairs:
+        raise FileNotFoundError(f"No valid image/mask pairs found for NCCD-PF in: {dataset_dir}")
+
     return pairs
 
 
@@ -231,43 +250,77 @@ def load_deepcrack(dataset_dir: Union[str, Path]) -> List[Tuple[Path, Path]]:
                 if img_path.stem in mask_map:
                     pairs.append((img_path, mask_map[img_path.stem]))
 
+    if not pairs:
+        raise FileNotFoundError(f"No valid image/mask pairs found for DeepCrack in: {dataset_dir}")
+
     return pairs
+
+
+def _resolve_crack500_folder(dataset_dir: Path, f_name: str) -> Optional[Path]:
+    """Resolve a CRACK500 split folder, handling the nested same-name subdirectory.
+
+    CRACK500 is distributed with each split stored in a self-named subfolder:
+        CRACK500/traindata/traindata/  (contains the actual files)
+    This helper returns the innermost directory that actually contains image
+    files, checking both the top-level folder and the nested variant.
+    """
+    candidates = [
+        dataset_dir / f_name / f_name,  # nested: CRACK500/traindata/traindata/
+        dataset_dir / f_name,            # flat:   CRACK500/traindata/
+    ]
+    for candidate in candidates:
+        if candidate.is_dir() and any(
+            f.is_file() and _is_image_file(f) for f in candidate.iterdir()
+        ):
+            return candidate
+    return None
 
 
 def load_crack500(dataset_dir: Union[str, Path]) -> List[Tuple[Path, Path]]:
     """
     Load image and mask pairs from CRACK500 dataset.
     Scans traindata/traincrop, valdata/valcrop, testdata/testcrop.
+
+    The CRACK500 distribution stores files in self-named subdirectories
+    (e.g. ``CRACK500/traindata/traindata/``).  Images and their binary masks
+    share the same filename stem; masks have a ``_mask`` suffix
+    (e.g. ``20160222_081011.jpg`` + ``20160222_081011_mask.png``).
+    Cropped sub-datasets (``traincrop``, etc.) use same-stem ``.png`` masks.
     """
     dataset_dir = Path(dataset_dir)
     if not dataset_dir.exists():
         raise FileNotFoundError(f"CRACK500 directory not found: {dataset_dir}")
 
     pairs: List[Tuple[Path, Path]] = []
-    # Check for cropped and uncropped folders
     folder_candidates = [
         "traindata", "traincrop", "valdata", "valcrop", "testdata", "testcrop"
     ]
 
     for f_name in folder_candidates:
-        folder = dataset_dir / f_name
-        if not folder.exists() or not folder.is_dir():
+        folder = _resolve_crack500_folder(dataset_dir, f_name)
+        if folder is None:
             continue
 
-        # In CRACK500, images and masks are in the same folder with mask ending in '_mask.png' or similar,
-        # or separate images/masks. Check both structures.
-        imgs = [f for f in folder.iterdir() if f.is_file() and _is_image_file(f) and not f.stem.endswith("_mask")]
+        # In CRACK500, input photos are .jpg/.jpeg/.JPG; masks are .png
+        imgs = [
+            f for f in sorted(folder.iterdir())
+            if f.is_file() and f.suffix.lower() in [".jpg", ".jpeg"] and not f.stem.endswith("_mask")
+        ]
         for img_path in imgs:
-            # Check candidate mask files
             possible_masks = [
                 folder / f"{img_path.stem}_mask.png",
                 folder / f"{img_path.stem}.png",
-                folder / f"{img_path.stem}.jpg",
             ]
-            for m_path in possible_masks:
-                if m_path.exists() and m_path != img_path:
-                    pairs.append((img_path, m_path))
-                    break
+            mask_path = next((m for m in possible_masks if m.exists()), None)
+            if mask_path is not None:
+                pairs.append((img_path, mask_path))
+            else:
+                raise FileNotFoundError(
+                    f"Missing matching mask for CRACK500 image: {img_path}"
+                )
+
+    if not pairs:
+        raise FileNotFoundError(f"No valid image/mask pairs found for CRACK500 in: {dataset_dir}")
 
     return pairs
 
@@ -299,6 +352,13 @@ def load_generic_dataset(
         if img_f.is_file() and _is_image_file(img_f):
             if img_f.stem in mask_map:
                 pairs.append((img_f, mask_map[img_f.stem]))
+
+    if not pairs:
+        raise FileNotFoundError(
+            f"No matching image/mask pairs found between:\n"
+            f"  images: {img_path}\n"
+            f"  masks : {mask_path}"
+        )
 
     return pairs
 
@@ -482,14 +542,30 @@ def get_train_val_test_datasets(
             continue
 
         if partitions.get("train") and not partitions.get("val"):
+            # No official validation split: carve val out of train proportionally.
+            # We use val/(train+val) as the effective val fraction so that the
+            # remaining train portion still represents ~train_ratio of all data.
+            tv_total = train_ratio + val_ratio
+            if tv_total <= 0:
+                raise ValueError(
+                    f"train_ratio + val_ratio must be > 0, got {tv_total}"
+                )
+            effective_val_ratio = val_ratio / tv_total
+            effective_train_ratio = train_ratio / tv_total
             train_part, val_part, _ = create_splits(
                 {dataset_name: partitions["train"]},
-                train_ratio=train_ratio,
-                val_ratio=val_ratio,
+                train_ratio=effective_train_ratio,
+                val_ratio=effective_val_ratio,
                 test_ratio=0.0,
                 seed=seed,
                 stratified=False,
             )
+            if not val_part:
+                raise RuntimeError(
+                    f"Validation split for '{dataset_name}' is empty after sub-splitting "
+                    f"the official train set ({len(partitions['train'])} samples). "
+                    f"Increase val_ratio or add more training data."
+                )
             partitions["train"] = train_part
             partitions["val"] = val_part
 

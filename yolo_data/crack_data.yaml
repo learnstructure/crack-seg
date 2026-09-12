@@ -1,9 +1,0 @@
-# Ultralytics YOLO Segmentation Dataset Configuration
-path: C:/Users/abinashm/OneDrive - University of Nevada, Reno/phd research/paper submission/crack-segmentation/crack-seg/yolo_data
-train: images/train
-val: images/val
-test: images/test
-
-# Classes
-names:
-  0: crack
