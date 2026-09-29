@@ -82,3 +82,75 @@ def analyze_cracks(prob_mask, threshold=0.5, min_pixels=10):
         )
 
     return crack_info
+
+
+def compute_crack_skeleton_and_width(mask: np.ndarray, threshold: int = 128) -> dict:
+    """
+    Compute Euclidean distance transform and medial axis skeleton to measure crack width in pixels.
+
+    Args:
+        mask (np.ndarray): 2D binary or grayscale mask (0-255 or 0.0-1.0).
+        threshold (int or float): Binarization threshold.
+
+    Returns:
+        dict containing:
+            - 'skeleton': 2D binary uint8 array of the crack centerline
+            - 'distance_map': 2D float32 array of Euclidean distances to nearest background
+            - 'width_map': 2D float32 array of local crack diameters (2 * distance) along the skeleton
+            - 'widths': 1D numpy array of width measurements (in pixels) for every centerline point
+            - 'mean_width': float (mean width in pixels)
+            - 'median_width': float (median width in pixels)
+            - 'max_width': float (max width in pixels)
+            - 'min_width': float (min width in pixels)
+            - 'std_width': float (standard deviation of width in pixels)
+            - 'total_crack_pixels': int (total foreground crack pixels)
+            - 'skeleton_length_pixels': int (total length of centerline in pixels)
+    """
+    mask_arr = np.asarray(mask)
+    if mask_arr.max() <= 1.0:
+        binary_mask = (mask_arr >= (threshold / 255.0 if threshold > 1 else threshold)).astype(np.uint8)
+    else:
+        binary_mask = (mask_arr >= threshold).astype(np.uint8)
+
+    total_crack_pixels = int(np.sum(binary_mask))
+    if total_crack_pixels == 0:
+        return {
+            "skeleton": np.zeros_like(binary_mask, dtype=np.uint8),
+            "distance_map": np.zeros_like(binary_mask, dtype=np.float32),
+            "width_map": np.zeros_like(binary_mask, dtype=np.float32),
+            "widths": np.array([], dtype=np.float32),
+            "mean_width": 0.0,
+            "median_width": 0.0,
+            "max_width": 0.0,
+            "min_width": 0.0,
+            "std_width": 0.0,
+            "total_crack_pixels": 0,
+            "skeleton_length_pixels": 0,
+        }
+
+    # 1-pixel medial-axis skeletonization (topological centerline)
+    from crack_seg.utils.metrics import _skeletonize
+    skel = _skeletonize(binary_mask)
+
+    # Euclidean distance transform (gives radius r of maximal inscribed circle at each pixel)
+    dist_map = cv2.distanceTransform(binary_mask, cv2.DIST_L2, 5)
+
+    # Full crack width = 2 * r (diameter in pixels)
+    width_map = np.zeros_like(dist_map, dtype=np.float32)
+    skel_mask = skel > 0
+    width_map[skel_mask] = dist_map[skel_mask] * 2.0
+    widths = width_map[skel_mask]
+
+    return {
+        "skeleton": skel,
+        "distance_map": dist_map,
+        "width_map": width_map,
+        "widths": widths,
+        "mean_width": float(np.mean(widths)) if len(widths) > 0 else 0.0,
+        "median_width": float(np.median(widths)) if len(widths) > 0 else 0.0,
+        "max_width": float(np.max(widths)) if len(widths) > 0 else 0.0,
+        "min_width": float(np.min(widths)) if len(widths) > 0 else 0.0,
+        "std_width": float(np.std(widths)) if len(widths) > 0 else 0.0,
+        "total_crack_pixels": total_crack_pixels,
+        "skeleton_length_pixels": int(len(widths)),
+    }

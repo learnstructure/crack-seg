@@ -1,3 +1,4 @@
+import os
 import torch
 from pathlib import Path
 
@@ -36,7 +37,7 @@ PIN_MEMORY = True
 
 # Model Configuration
 # Options: "unet", "deeplabv3", "deeplabv3plus", "segformer", "segnet", "unetplusplus", "fpn", "linknet", "pspnet", "yolo_seg"
-MODEL_NAME = "unet"  # Choose from the supported models
+MODEL_NAME = "yolo_seg"  # Choose from the supported models
 
 ENCODER_NAME = "resnet34"  # For SMP models
 PRETRAINED = True
@@ -56,7 +57,13 @@ MASK_THRESHOLD = 128  # Grayscale threshold to binarize masks
 LOSS = "dice"  # "dice", "bce"
 METRICS = ["iou", "dice", "accuracy", "precision", "recall", "specificity"]
 
+# Skeletonization and Centerline Evaluation Configuration
+# Options: "lee" (default, Lee's medial axis algorithm), "zhang" (Zhang-Suen thinning)
+SKELETON_METHOD = os.getenv("SKELETON_METHOD", "lee")
+CENTERLINE_TOLERANCE_PX = float(os.getenv("CENTERLINE_TOLERANCE_PX", "20.0"))
+
 # Checkpoints
 CHECKPOINT_DIR = BASE_DIR / "checkpoints"
 CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+
 

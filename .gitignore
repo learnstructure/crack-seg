@@ -64,3 +64,6 @@ ehthumbs.db
 
 # Large documentation exports
 README.pdf
+
+*.png
+*.jpg

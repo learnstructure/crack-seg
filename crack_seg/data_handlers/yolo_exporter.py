@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import List, Tuple, Union, Optional, Sequence
 import numpy as np
@@ -10,6 +11,44 @@ from crack_seg import config
 from crack_seg.data_handlers.dataset_loaders import (
     get_train_val_test_datasets,
 )
+
+
+def safe_rmtree(path: Path, max_retries: int = 3, delay: float = 1.0) -> None:
+    """
+    Safely remove a directory tree, handling Windows/OneDrive permission issues.
+    
+    Args:
+        path: Path to directory to remove.
+        max_retries: Maximum number of retry attempts.
+        delay: Delay between retries in seconds.
+    """
+    if not path.exists():
+        return
+    
+    for attempt in range(max_retries):
+        try:
+            shutil.rmtree(path)
+            return
+        except PermissionError as e:
+            if attempt < max_retries - 1:
+                print(f"  Permission error on {path}, retrying in {delay}s... (attempt {attempt + 1}/{max_retries})")
+                time.sleep(delay)
+            else:
+                # Last attempt failed - try to remove read-only attributes and retry once more
+                try:
+                    import stat
+                    def remove_readonly(func, path, excinfo):
+                        os.chmod(path, stat.S_IWRITE)
+                        func(path)
+                    shutil.rmtree(path, onerror=remove_readonly)
+                    return
+                except Exception:
+                    print(f"  Warning: Could not remove {path} due to permission error: {e}")
+                    print(f"  Continuing with existing directory (files may be overwritten)")
+                    return
+        except Exception as e:
+            print(f"  Warning: Error removing {path}: {e}")
+            return
 
 
 def mask_to_yolo_polygons(
@@ -178,7 +217,7 @@ def export_dataset_to_yolo(
         for subdirectory in ("images", "labels"):
             split_dir = output_dir / subdirectory / split_name
             if split_dir.exists():
-                shutil.rmtree(split_dir)
+                safe_rmtree(split_dir)
 
     print(f"\nExporting YOLO segmentation dataset to: {output_dir.resolve()}")
     n_train = export_split_to_yolo(train_samples, "train", output_dir, threshold=threshold)
