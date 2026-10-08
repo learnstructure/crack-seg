@@ -1,0 +1,54 @@
+Crack Segmentation Evaluation — Experimental Run (2026-09-30 20:34:33)
+================================================================================
+PyTorch version    : 2.10.0+cu128
+CUDA available     : True
+Device (config)    : cuda
+Skeleton Method    : lee
+Centerline Tol     : ±20.0 px
+Morph Open Kernel  : 3x3 px (Branch Removal)
+Output Text File   : C:\Users\abinashm\OneDrive - University of Nevada, Reno\phd research\paper submission\crack-segmentation\crack-seg\experimenting\paper_benchmark.txt
+
+  ✓  Found  : UNet (NCCD-PF)           (unet_NCCD-PF_Dataset.pth)
+  ✓  Found  : UNet (4 Datasets)        (unet_CConCrack_NCCD-PF_Dataset_DeepCrack_CRACK500.pth)
+  ✓  Found  : YOLO-seg (4 Datasets)    (yolo_seg_CConCrack_NCCD-PF_Dataset_DeepCrack_CRACK500.pt)
+
+Total Test Set     : 69 unseen images (no training overlap confirmed)
+
+Running evaluation on test samples...
+Evaluation Results — 69 Unseen Test Samples
+====================================================================================================
+Metric                                    UNet (NCCD-PF)     UNet (4 Datasets) YOLO-seg (4 Datasets)
+----------------------------------------------------------------------------------------------------
+--- 1. Area-based ---             
+----------------------------------------------------------------------------------------------------
+IoU                                               0.6209                0.5427                0.5120
+Dice                                              0.7458                0.6623                0.6374
+Accuracy                                          0.9935                0.9925                0.9912
+Precision                                         0.7881                0.8201                0.7640
+Recall                                            0.7809                0.6640                0.6753
+Specificity                                       0.9966                0.9973                0.9956
+----------------------------------------------------------------------------------------------------
+--- 2. Topology & Centerline (Raw Skeleton) ---
+----------------------------------------------------------------------------------------------------
+clDice                                            0.8498                0.7771                0.7562
+Centerline_Prec@20                                0.9401                0.8690                0.8496
+Centerline_Rec@20                                 0.9364                0.8317                0.8059
+Centerline_F1@20                                  0.9286                0.8391                0.8163
+Centerline_IoU@20                                 0.8032                0.7248                0.7261
+Orientation_MAE(deg)                             12.2635               17.2462               16.0706
+----------------------------------------------------------------------------------------------------
+--- 3. Topology & Centerline (Branch Removed: Open 3px) ---
+----------------------------------------------------------------------------------------------------
+clDice (Opened)                                   0.8690                0.7817                0.7674
+Centerline_Prec@20 (Opened)                       0.9428                0.8702                0.8517
+Centerline_Rec@20 (Opened)                        0.9346                0.8313                0.8062
+Centerline_F1@20 (Opened)                         0.9287                0.8394                0.8174
+Centerline_IoU@20 (Opened)                        0.8195                0.7281                0.7299
+====================================================================================================
+Metric Notes & Explanations:
+  • Raw vs. Opened Centerlines : Section 2 uses raw skeletons. Section 3 removes spurious tiny branches
+                                via 3x3 morphological opening before skeletonization.
+  • Centerline_*@20           : Width-independent precision/recall/F1/IoU within ±20.0px buffer.
+  • clDice                     : Centerline Dice (CVPR 2021) measuring topological connectivity.
+  • Orientation_MAE            : Mean Angular Error in degrees (lower is better, 0° = perfect alignment).
+

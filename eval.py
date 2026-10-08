@@ -52,9 +52,58 @@ parser.add_argument(
     default=getattr(config, "CENTERLINE_TOLERANCE_PX", 20.0),
     help="Euclidean tolerance buffer in pixels for centerline metrics (default 20.0).",
 )
+parser.add_argument(
+    "--prune-spurs",
+    action="store_true",
+    default=getattr(config, "PRUNE_SKELETON_SPURS", False),
+    help="Option B: Prune dead-end skeleton spurs connected to junctions.",
+)
+parser.add_argument(
+    "--max-spur-len",
+    type=int,
+    default=getattr(config, "MAX_SPUR_LEN", 10),
+    help="Maximum length of dead-end spurs to prune in pixels (default 10).",
+)
+parser.add_argument(
+    "--morph-open",
+    action="store_true",
+    default=getattr(config, "MORPH_OPEN_MASK", False),
+    help="Option A: Apply morphological opening (erode then dilate) on mask before skeletonization.",
+)
+parser.add_argument(
+    "--open-kernel-size",
+    type=int,
+    default=getattr(config, "MORPH_OPEN_KERNEL_SIZE", 3),
+    help="Kernel size for morphological opening (default 3).",
+)
+parser.add_argument(
+    "--morph-op",
+    type=str,
+    default=getattr(config, "MORPH_OP", None),
+    help="Morphological operation on mask before thinning: 'open', 'close', 'close_open', 'open_close', 'dilate', 'erode'.",
+)
+parser.add_argument(
+    "--morph-kernel-size",
+    type=int,
+    default=getattr(config, "MORPH_KERNEL_SIZE", 3),
+    help="Structuring element kernel size in pixels (default 3).",
+)
+parser.add_argument(
+    "--morph-iterations",
+    type=int,
+    default=getattr(config, "MORPH_ITERATIONS", 1),
+    help="Number of morphological iterations (e.g. dilate N times then erode N times for closing, default 1).",
+)
 cli_args, _ = parser.parse_known_args()
 config.SKELETON_METHOD = cli_args.skeleton_method
 config.CENTERLINE_TOLERANCE_PX = cli_args.tolerance_px
+config.PRUNE_SKELETON_SPURS = cli_args.prune_spurs
+config.MAX_SPUR_LEN = cli_args.max_spur_len
+config.MORPH_OPEN_MASK = cli_args.morph_open
+config.MORPH_OPEN_KERNEL_SIZE = cli_args.open_kernel_size
+config.MORPH_OP = cli_args.morph_op
+config.MORPH_KERNEL_SIZE = cli_args.morph_kernel_size
+config.MORPH_ITERATIONS = cli_args.morph_iterations
 
 # ==============================================================================
 # 0. Environment Info
@@ -64,6 +113,8 @@ print("CUDA available   :", torch.cuda.is_available())
 print("Device (config)  :", config.DEVICE)
 print(f"Skeleton Method  : {config.SKELETON_METHOD}")
 print(f"Centerline Tol   : ±{config.CENTERLINE_TOLERANCE_PX} px")
+print(f"Prune Spurs      : {config.PRUNE_SKELETON_SPURS} (max len: {config.MAX_SPUR_LEN} px)")
+print(f"Morph Op         : {config.MORPH_OP} (ksize: {config.MORPH_KERNEL_SIZE} px, iters: {config.MORPH_ITERATIONS})")
 print()
 
 # ==============================================================================

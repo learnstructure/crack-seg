@@ -49,6 +49,11 @@ crack-segmentation/
     ├── yolo_data/                        # Auto-generated YOLO polygon dataset & crack_data.yaml
     ├── eval.py                           # Multi-model benchmarking with width-independent & centerline metrics
     ├── main.ipynb                        # Interactive exploration & demo notebook
+    ├── experimenting/                    # Experiments, visualizations & real-world bridge eval
+    │   ├── visualize_skeleton.py         # 4-col skeletonizer: Raw vs Opening vs Closing
+    │   ├── output/                       # Output directory for comparison figures & plots
+    │   ├── real_bridge.ipynb             # Real bridge inference & timing comparison
+    │   └── eval_exp.ipynb                # Interactive notebook evaluation
     ├── pyproject.toml                    # Package dependencies & configuration
     └── crack_seg/                        # Source package
         ├── config.py                     # Central configuration (datasets, model, hyperparameters)
@@ -139,6 +144,20 @@ IMG_SIZE = (448, 448)
 # Options: "lee" (default, Lee's medial axis algorithm), "zhang" (Zhang-Suen thinning)
 SKELETON_METHOD = "lee"
 CENTERLINE_TOLERANCE_PX = 20.0  # Euclidean distance tolerance buffer in pixels
+
+# Morphological Preprocessing on Mask before skeletonization
+# Options: "open", "close", "close_open", "open_close", "dilate", "erode", or None
+MORPH_OP = None                # Default None (raw mask)
+MORPH_KERNEL_SIZE = 3          # Structuring element kernel size in pixels
+MORPH_ITERATIONS = 1           # Number of iterations (e.g. dilate N times then erode N times for closing)
+
+# Optional Spur Pruning on Skeleton Graph
+PRUNE_SKELETON_SPURS = False   # Removes tiny dead-end side branches <= MAX_SPUR_LEN pixels
+MAX_SPUR_LEN = 10
+
+# Legacy aliases (supported for backward compatibility)
+MORPH_OPEN_MASK = False
+MORPH_OPEN_KERNEL_SIZE = 3
 ```
 
 ---
@@ -203,6 +222,19 @@ python eval.py --skeleton-method zhang
 # Customize Euclidean tolerance radius (e.g. ±10 px total corridor width of ~20 px):
 python eval.py --tolerance-px 10.0
 
+# Morphological Preprocessing on mask before thinning:
+# Option A: Morphological opening (erode then dilate) to remove boundary spurs:
+python eval.py --morph-op open --morph-kernel-size 3
+
+# Option B: Morphological closing (dilate then erode) to bridge micro-gaps and reconnect broken cracks:
+python eval.py --morph-op close --morph-kernel-size 3 --morph-iterations 2
+
+# Combined closing followed by opening:
+python eval.py --morph-op close_open --morph-kernel-size 3
+
+# Optional dead-end spur pruning on skeleton graph:
+python eval.py --prune-spurs --max-spur-len 10
+
 # View all CLI options:
 python eval.py --help
 ```
@@ -259,14 +291,25 @@ You can use the new width-independent functions directly in your own code or not
 
 ```python
 from crack_seg.utils.metrics import (
+    _skeletonize,
     centerline_buffer_metrics,
     crack_length_in_pixels,
     cldice_score,
     crack_orientation_metrics,
 )
 
-# 1. Measure crack lengths and tolerance buffer parameters
-metrics = centerline_buffer_metrics(pred_mask, gt_mask, tolerance_px=20.0)
+# 1. Custom skeletonization with multi-iteration closing (bridges micro-gaps):
+skel = _skeletonize(mask, morph_op="close", morph_kernel_size=3, morph_iterations=2)
+
+# 2. Measure crack lengths and tolerance buffer parameters with morphological preprocessing:
+metrics = centerline_buffer_metrics(
+    pred_mask,
+    gt_mask,
+    tolerance_px=20.0,
+    morph_op="close",
+    morph_kernel_size=3,
+    morph_iterations=1,
+)
 print(f"True Crack Length:       {metrics['gt_length_px']} px")
 print(f"Pred Crack Length:       {metrics['pred_length_px']} px")
 print(f"Pred in 20px Bound:      {metrics['pred_len_in_bound_px']} px ({metrics['precision']*100:.1f}%)")
@@ -274,17 +317,43 @@ print(f"True Covered in 20px:    {metrics['gt_len_covered_px']} px ({metrics['re
 print(f"Centerline F1@20:        {metrics['f1_score']:.4f}")
 print(f"Centerline IoU@20:       {metrics['iou']:.4f}")
 
-# 2. Topology connectivity (clDice)
-print(f"clDice:                  {cldice_score(pred_mask, gt_mask):.4f}")
+# 3. Topology connectivity (clDice) with morphological opening (removes boundary bumps):
+print(f"clDice:                  {cldice_score(pred_mask, gt_mask, morph_op='open', morph_kernel_size=3):.4f}")
 
-# 3. Crack orientation & Mean Angular Error (degrees)
+# 4. Crack orientation & Mean Angular Error (degrees)
 ori = crack_orientation_metrics(pred_mask, gt_mask)
 print(f"Orientation MAE:         {ori['mae_deg']:.1f}°")
 ```
 
 ---
 
-### 4. Single-Image Prediction & Inference
+### 4. Skeleton, Mask Opening & Closing Visualizer
+To visually inspect crack skeletons and compare **Option A (Morphological Opening)** and **Option B (Morphological Closing)** across random dataset masks:
+
+```bash
+# Visualize 20 random masks (automatically saved to experimenting/output/skeleton_comparison_all.png):
+python experimenting/visualize_skeleton.py --num-masks 20 --open-kernel-size 3 --close-kernel-size 3 --close-iterations 1
+
+# Multi-iteration closing (dilate N times then erode N times to bridge wider micro-gaps):
+python experimenting/visualize_skeleton.py --num-masks 10 --close-iterations 2 --close-kernel-size 5
+
+# Custom save path without displaying interactive GUI:
+python experimenting/visualize_skeleton.py --save-path experimenting/output/my_comparison.png --no-show
+```
+
+This generates a side-by-side **4-column figure**:
+1. **Original Mask**: Binary crack ground truth with pixel area.
+2. **Raw Skeleton (Red)**: Medial-axis centerline without preprocessing.
+3. **Option A: Morphologically Opened Mask Skeleton (Cyan)**: Skeleton extracted after erosion-then-dilation (`open_kernel_size`), eliminating jagged boundary bumps and false branch spurs.
+4. **Option B: Morphologically Closed Mask Skeleton (Green + Orange)**: Skeleton extracted after dilation-then-erosion (`close_kernel_size`, `close_iterations`). Newly bridged crack segments and connections are highlighted in **orange** (`[255, 140, 0]`) and the closed skeleton is shown in **green** (`[0, 200, 80]`).
+
+> 💡 **Default Save Location**: When `--save-path` is omitted, figures are automatically saved to [`experimenting/output/skeleton_comparison_all.png`](experimenting/output/skeleton_comparison_all.png).
+>
+> 📖 **Reference Guide**: For an in-depth mathematical explanation, parameter breakdown, and paper reporting suggestions for Option A & Option B, see [experimenting/skeleton_visualizations/README.md](experimenting/skeleton_visualizations/README.md).
+
+---
+
+### 5. Single-Image Prediction & Inference
 
 ```bash
 # Inference with a PyTorch checkpoint:

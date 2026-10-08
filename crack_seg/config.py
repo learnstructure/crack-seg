@@ -1,4 +1,7 @@
 import os
+
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import torch
 from pathlib import Path
 
@@ -37,7 +40,7 @@ PIN_MEMORY = True
 
 # Model Configuration
 # Options: "unet", "deeplabv3", "deeplabv3plus", "segformer", "segnet", "unetplusplus", "fpn", "linknet", "pspnet", "yolo_seg"
-MODEL_NAME = "yolo_seg"  # Choose from the supported models
+MODEL_NAME = "segformer"  # Choose from the supported models
 
 ENCODER_NAME = "resnet34"  # For SMP models
 PRETRAINED = True
@@ -61,6 +64,17 @@ METRICS = ["iou", "dice", "accuracy", "precision", "recall", "specificity"]
 # Options: "lee" (default, Lee's medial axis algorithm), "zhang" (Zhang-Suen thinning)
 SKELETON_METHOD = os.getenv("SKELETON_METHOD", "lee")
 CENTERLINE_TOLERANCE_PX = float(os.getenv("CENTERLINE_TOLERANCE_PX", "20.0"))
+# Morphological Spur Pruning (removes tiny side branches <= MAX_SPUR_LEN pixels)
+PRUNE_SKELETON_SPURS = os.getenv("PRUNE_SKELETON_SPURS", "False").lower() in ("true", "1", "yes")
+MAX_SPUR_LEN = int(os.getenv("MAX_SPUR_LEN", "10"))
+# Morphological Mask Preprocessing before skeletonization
+# MORPH_OP: None, "open" (erode then dilate), "close" (dilate then erode), "close_open", "dilate", "erode"
+MORPH_OP = os.getenv("MORPH_OP", None)
+MORPH_KERNEL_SIZE = int(os.getenv("MORPH_KERNEL_SIZE", "3"))
+MORPH_ITERATIONS = int(os.getenv("MORPH_ITERATIONS", "1"))
+# Backward-compatibility aliases for Morphological Opening
+MORPH_OPEN_MASK = os.getenv("MORPH_OPEN_MASK", "False").lower() in ("true", "1", "yes")
+MORPH_OPEN_KERNEL_SIZE = int(os.getenv("MORPH_OPEN_KERNEL_SIZE", str(MORPH_KERNEL_SIZE)))
 
 # Checkpoints
 CHECKPOINT_DIR = BASE_DIR / "checkpoints"

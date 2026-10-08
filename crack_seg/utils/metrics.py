@@ -5,6 +5,7 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 import torch
 import numpy as np
 import cv2
+import scipy.ndimage as ndi
 
 
 def iou_score(pred, target, smooth=1e-6):
@@ -76,9 +77,95 @@ def _to_2d_binary(mask, threshold: float = 0.5) -> np.ndarray:
     return (arr >= threshold).astype(np.uint8)
 
 
-def _skeletonize(binary_mask: np.ndarray, method: str = None) -> np.ndarray:
+def prune_skeleton_spurs(skel: np.ndarray, max_spur_len: int = 10) -> np.ndarray:
     """
-    Skeletonize a binary mask to a 1-pixel-wide centerline using scikit-image.
+    Morphologically removes spurious dead-end branches (spurs) shorter than or equal
+    to max_spur_len connected to junctions in a 1-pixel skeleton.
+
+    Preserves main crack centerlines and genuine forks longer than max_spur_len,
+    as well as isolated crack segments without junctions.
+
+    Args:
+        skel (np.ndarray): 2-D binary skeleton (0 or 1).
+        max_spur_len (int): Maximum length (in pixels) of a dead-end branch to prune. Default 10.
+
+    Returns:
+        np.ndarray: Pruned 2-D binary skeleton (uint8).
+    """
+    if skel.sum() == 0 or max_spur_len <= 0:
+        return skel.copy()
+
+    sk = (skel > 0).astype(np.uint8)
+    kernel = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=np.uint8)
+
+    # Multi-pass to handle cascading sub-spurs
+    for _ in range(5):
+        nbr_cnt = ndi.convolve(sk, kernel, mode="constant", cval=0) * sk
+        endpoints = np.argwhere((nbr_cnt == 1) & (sk == 1))
+        junctions = (nbr_cnt >= 3) & (sk == 1)
+
+        pruned_any = False
+        for ep in endpoints:
+            r, c = ep
+            path = [(r, c)]
+            curr_r, curr_c = r, c
+            prev_r, prev_c = -1, -1
+            is_spur = False
+
+            for _ in range(max_spur_len):
+                nbrs = []
+                for dr in (-1, 0, 1):
+                    for dc in (-1, 0, 1):
+                        if dr == 0 and dc == 0:
+                            continue
+                        nr, nc = curr_r + dr, curr_c + dc
+                        if 0 <= nr < sk.shape[0] and 0 <= nc < sk.shape[1]:
+                            if sk[nr, nc] and not (nr == prev_r and nc == prev_c):
+                                nbrs.append((nr, nc))
+
+                if len(nbrs) == 0:
+                    # Isolated crack segment without junctions -> keep it
+                    break
+                elif len(nbrs) == 1:
+                    nr, nc = nbrs[0]
+                    if junctions[nr, nc]:
+                        # Reached a junction within max_spur_len -> it is a spur!
+                        is_spur = True
+                        break
+                    path.append((nr, nc))
+                    prev_r, prev_c = curr_r, curr_c
+                    curr_r, curr_c = nr, nc
+                else:
+                    # Multiple neighbors -> hit a junction
+                    is_spur = True
+                    break
+
+            if is_spur:
+                for pr, pc in path:
+                    sk[pr, pc] = 0
+                pruned_any = True
+
+        if not pruned_any:
+            break
+
+    return sk
+
+
+def _skeletonize(
+    binary_mask: np.ndarray,
+    method: str = None,
+    prune_spurs: bool = None,
+    max_spur_len: int = None,
+    morph_open: bool = None,
+    open_kernel_size: int = None,
+    morph_op: str = None,
+    morph_kernel_size: int = None,
+    morph_iterations: int = None,
+) -> np.ndarray:
+    """
+    Skeletonize a binary mask to a 1-pixel-wide centerline using scikit-image,
+    with optional morphological mask preprocessing (Opening, Closing, Close-Open)
+    and/or dead-end branch spur pruning.
 
     Args:
         binary_mask (np.ndarray): 2-D binary mask (0 or 1 / True or False).
@@ -87,6 +174,23 @@ def _skeletonize(binary_mask: np.ndarray, method: str = None) -> np.ndarray:
             Options:
             - 'lee' (default): Lee's medial axis algorithm (preserves 8-connectivity and true topology).
             - 'zhang': Zhang-Suen thinning algorithm.
+        prune_spurs (bool, optional): If True, morphologically prunes tiny dead-end spur branches
+            <= max_spur_len connected to junctions. If None, reads config.PRUNE_SKELETON_SPURS.
+        max_spur_len (int, optional): Maximum length (in pixels) of spurs to prune. If None, reads config.MAX_SPUR_LEN (10).
+        morph_open (bool, optional): Legacy alias. If True, sets morph_op='open'.
+        open_kernel_size (int, optional): Legacy alias for morph_kernel_size.
+        morph_op (str, optional): Morphological operation applied to the binary mask before thinning:
+            - 'open' (or 'opening'): Erosion followed by Dilation (smooths jagged edges & removes false branch spurs).
+            - 'close' (or 'closing'): Dilation followed by Erosion (bridges gaps & reconnects broken crack segments).
+            - 'close_open': Closing then Opening (bridges gaps, then removes boundary bumps).
+            - 'open_close': Opening then Closing.
+            - 'dilate': Pure dilation.
+            - 'erode': Pure erosion.
+            - None: No morphological preprocessing.
+            If None, checks config.MORPH_OP and config.MORPH_OPEN_MASK.
+        morph_kernel_size (int, optional): Structuring element kernel size in pixels (default: 3).
+        morph_iterations (int, optional): Number of times to apply the morphological operation (default: 1).
+            For closing: dilates N times then erodes N times.
 
     Returns:
         np.ndarray: 2-D uint8 array with 1 for centerline and 0 for background.
@@ -98,6 +202,48 @@ def _skeletonize(binary_mask: np.ndarray, method: str = None) -> np.ndarray:
         except (ImportError, AttributeError):
             method = "lee"
 
+    try:
+        from crack_seg import config
+        if prune_spurs is None:
+            prune_spurs = getattr(config, "PRUNE_SKELETON_SPURS", False)
+        if max_spur_len is None:
+            max_spur_len = getattr(config, "MAX_SPUR_LEN", 10)
+        if morph_open is None:
+            morph_open = getattr(config, "MORPH_OPEN_MASK", False)
+        if open_kernel_size is None:
+            open_kernel_size = getattr(config, "MORPH_OPEN_KERNEL_SIZE", 3)
+        if morph_op is None:
+            morph_op = getattr(config, "MORPH_OP", None)
+        if morph_kernel_size is None:
+            morph_kernel_size = getattr(config, "MORPH_KERNEL_SIZE", open_kernel_size)
+        if morph_iterations is None:
+            morph_iterations = getattr(config, "MORPH_ITERATIONS", 1)
+    except (ImportError, AttributeError):
+        if prune_spurs is None:
+            prune_spurs = False
+        if max_spur_len is None:
+            max_spur_len = 10
+        if morph_open is None:
+            morph_open = False
+        if open_kernel_size is None:
+            open_kernel_size = 3
+        if morph_op is None:
+            morph_op = None
+        if morph_kernel_size is None:
+            morph_kernel_size = open_kernel_size
+        if morph_iterations is None:
+            morph_iterations = 1
+
+    # Backward compatibility with morph_open boolean flag
+    if morph_op is None and morph_open:
+        morph_op = "open"
+
+    if morph_kernel_size is None:
+        morph_kernel_size = open_kernel_size if open_kernel_size is not None else 3
+
+    if morph_iterations is None:
+        morph_iterations = 1
+
     mask_2d = np.squeeze(binary_mask)
     if mask_2d.ndim != 2:
         raise ValueError(
@@ -107,23 +253,82 @@ def _skeletonize(binary_mask: np.ndarray, method: str = None) -> np.ndarray:
     if mask_u8.max() == 0:
         return np.zeros_like(mask_u8)
 
+    # Morphological Preprocessing on mask before skeletonization
+    if morph_op and str(morph_op).lower() not in ("none", "false", ""):
+        op_lower = str(morph_op).lower()
+        ksize = morph_kernel_size if morph_kernel_size % 2 == 1 else morph_kernel_size + 1
+        ksize = max(1, ksize)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
+        iters = max(1, int(morph_iterations))
+
+        if op_lower in ("open", "opening"):
+            # Erosion followed by Dilation (Option A: removes false branch spurs)
+            processed = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, kernel, iterations=iters)
+        elif op_lower in ("close", "closing"):
+            # Dilation followed by Erosion (Morphological Closing: bridges gaps / connects segments)
+            processed = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel, iterations=iters)
+        elif op_lower in ("close_open", "closing_opening"):
+            closed = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel, iterations=iters)
+            processed = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel, iterations=iters)
+        elif op_lower in ("open_close", "opening_closing"):
+            opened = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, kernel, iterations=iters)
+            processed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel, iterations=iters)
+        elif op_lower == "dilate":
+            processed = cv2.dilate(mask_u8, kernel, iterations=iters)
+        elif op_lower == "erode":
+            processed = cv2.erode(mask_u8, kernel, iterations=iters)
+        else:
+            raise ValueError(
+                f"Unknown morph_op: '{morph_op}'. Supported: 'open', 'close', 'close_open', 'open_close', 'dilate', 'erode'."
+            )
+
+        if processed.max() > 0 or mask_u8.max() == 0:
+            mask_u8 = processed
+
     try:
         from skimage.morphology import skeletonize as sk_skeletonize
-        return sk_skeletonize(mask_u8.astype(bool), method=method).astype(np.uint8)
+        skel = sk_skeletonize(mask_u8.astype(bool), method=method).astype(np.uint8)
     except ImportError as e:
         raise ImportError(
             "scikit-image is required for crack skeletonization. "
             "Please install it via: pip install scikit-image"
         ) from e
 
+    # Option B: Morphological Skeleton Spur Pruning
+    if prune_spurs:
+        skel = prune_skeleton_spurs(skel, max_spur_len=max_spur_len)
 
-def crack_length_in_pixels(mask, threshold: float = 0.5, method: str = None) -> int:
+    return skel
+
+
+def crack_length_in_pixels(
+    mask,
+    threshold: float = 0.5,
+    method: str = None,
+    prune_spurs: bool = None,
+    max_spur_len: int = None,
+    morph_open: bool = None,
+    open_kernel_size: int = None,
+    morph_op: str = None,
+    morph_kernel_size: int = None,
+    morph_iterations: int = None,
+) -> int:
     """
     Calculate the total length of cracks in pixels by computing
-    the 1-pixel-wide medial-axis skeleton.
+    the 1-pixel-wide medial-axis skeleton (with optional spur pruning and/or mask preprocessing).
     """
     bin_mask = _to_2d_binary(mask, threshold)
-    skel = _skeletonize(bin_mask, method=method)
+    skel = _skeletonize(
+        bin_mask,
+        method=method,
+        prune_spurs=prune_spurs,
+        max_spur_len=max_spur_len,
+        morph_open=morph_open,
+        open_kernel_size=open_kernel_size,
+        morph_op=morph_op,
+        morph_kernel_size=morph_kernel_size,
+        morph_iterations=morph_iterations,
+    )
     return int(skel.sum())
 
 
@@ -134,6 +339,13 @@ def skeleton_iou_score(
     tolerance_px: int = 3,
     smooth: float = 1e-6,
     method: str = None,
+    prune_spurs: bool = None,
+    max_spur_len: int = None,
+    morph_open: bool = None,
+    open_kernel_size: int = None,
+    morph_op: str = None,
+    morph_kernel_size: int = None,
+    morph_iterations: int = None,
 ) -> float:
     """
     Skeleton-based IoU metric with optional tolerance dilation.
@@ -145,6 +357,10 @@ def skeleton_iou_score(
         tolerance_px (int): Dilation radius in pixels applied to each skeleton.
         smooth (float): Additive smoothing to avoid 0/0. Default 1e-6.
         method (str, optional): Skeletonization algorithm ('lee' or 'zhang').
+        prune_spurs (bool, optional): Prune dead-end spurs (Option B).
+        max_spur_len (int, optional): Maximum spur length to prune.
+        morph_open (bool, optional): Morphological opening on mask before thinning (Option A).
+        open_kernel_size (int, optional): Kernel size for morphological opening.
 
     Returns:
         float: Skeleton IoU in [0, 1].
@@ -152,8 +368,28 @@ def skeleton_iou_score(
     pred_bin = _to_2d_binary(pred_mask, threshold)
     gt_bin = _to_2d_binary(gt_mask, threshold)
 
-    pred_skel = _skeletonize(pred_bin, method=method)
-    gt_skel = _skeletonize(gt_bin, method=method)
+    pred_skel = _skeletonize(
+        pred_bin,
+        method=method,
+        prune_spurs=prune_spurs,
+        max_spur_len=max_spur_len,
+        morph_open=morph_open,
+        open_kernel_size=open_kernel_size,
+        morph_op=morph_op,
+        morph_kernel_size=morph_kernel_size,
+        morph_iterations=morph_iterations,
+    )
+    gt_skel = _skeletonize(
+        gt_bin,
+        method=method,
+        prune_spurs=prune_spurs,
+        max_spur_len=max_spur_len,
+        morph_open=morph_open,
+        open_kernel_size=open_kernel_size,
+        morph_op=morph_op,
+        morph_kernel_size=morph_kernel_size,
+        morph_iterations=morph_iterations,
+    )
 
     len_pred = pred_skel.sum()
     len_gt = gt_skel.sum()
@@ -189,6 +425,13 @@ def centerline_buffer_metrics(
     threshold: float = 0.5,
     tolerance_px: float = None,
     method: str = None,
+    prune_spurs: bool = None,
+    max_spur_len: int = None,
+    morph_open: bool = None,
+    open_kernel_size: int = None,
+    morph_op: str = None,
+    morph_kernel_size: int = None,
+    morph_iterations: int = None,
 ) -> dict:
     """
     Computes crack lengths (in pixels), length of predicted cracks within the
@@ -202,6 +445,10 @@ def centerline_buffer_metrics(
         tolerance_px (float, optional): Euclidean distance tolerance in pixels.
             If None, reads config.CENTERLINE_TOLERANCE_PX (defaults to 20.0).
         method (str, optional): Skeletonization algorithm ('lee' or 'zhang').
+        prune_spurs (bool, optional): Prune dead-end spurs (Option B).
+        max_spur_len (int, optional): Maximum spur length to prune.
+        morph_open (bool, optional): Morphological opening on mask before thinning (Option A).
+        open_kernel_size (int, optional): Kernel size for morphological opening.
 
     Returns:
         dict:
@@ -224,8 +471,28 @@ def centerline_buffer_metrics(
     pred_bin = _to_2d_binary(pred_mask, threshold)
     gt_bin = _to_2d_binary(gt_mask, threshold)
 
-    pred_skel = _skeletonize(pred_bin, method=method)
-    gt_skel = _skeletonize(gt_bin, method=method)
+    pred_skel = _skeletonize(
+        pred_bin,
+        method=method,
+        prune_spurs=prune_spurs,
+        max_spur_len=max_spur_len,
+        morph_open=morph_open,
+        open_kernel_size=open_kernel_size,
+        morph_op=morph_op,
+        morph_kernel_size=morph_kernel_size,
+        morph_iterations=morph_iterations,
+    )
+    gt_skel = _skeletonize(
+        gt_bin,
+        method=method,
+        prune_spurs=prune_spurs,
+        max_spur_len=max_spur_len,
+        morph_open=morph_open,
+        open_kernel_size=open_kernel_size,
+        morph_op=morph_op,
+        morph_kernel_size=morph_kernel_size,
+        morph_iterations=morph_iterations,
+    )
 
     len_pred = int(pred_skel.sum())
     len_gt = int(gt_skel.sum())
@@ -284,27 +551,27 @@ def centerline_buffer_metrics(
     }
 
 
-def centerline_f1(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None) -> float:
+def centerline_f1(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None) -> float:
     """Convenience wrapper returning Centerline F1 score at given tolerance."""
-    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method)["f1_score"]
+    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method, prune_spurs=prune_spurs, max_spur_len=max_spur_len, morph_open=morph_open, open_kernel_size=open_kernel_size, morph_op=morph_op, morph_kernel_size=morph_kernel_size, morph_iterations=morph_iterations)["f1_score"]
 
 
-def centerline_iou(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None) -> float:
+def centerline_iou(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None) -> float:
     """Convenience wrapper returning Centerline IoU (length Jaccard) at given tolerance."""
-    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method)["iou"]
+    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method, prune_spurs=prune_spurs, max_spur_len=max_spur_len, morph_open=morph_open, open_kernel_size=open_kernel_size, morph_op=morph_op, morph_kernel_size=morph_kernel_size, morph_iterations=morph_iterations)["iou"]
 
 
-def centerline_precision(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None) -> float:
+def centerline_precision(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None) -> float:
     """Convenience wrapper returning Centerline Precision at given tolerance."""
-    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method)["precision"]
+    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method, prune_spurs=prune_spurs, max_spur_len=max_spur_len, morph_open=morph_open, open_kernel_size=open_kernel_size, morph_op=morph_op, morph_kernel_size=morph_kernel_size, morph_iterations=morph_iterations)["precision"]
 
 
-def centerline_recall(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None) -> float:
+def centerline_recall(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None) -> float:
     """Convenience wrapper returning Centerline Recall at given tolerance."""
-    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method)["recall"]
+    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method, prune_spurs=prune_spurs, max_spur_len=max_spur_len, morph_open=morph_open, open_kernel_size=open_kernel_size, morph_op=morph_op, morph_kernel_size=morph_kernel_size, morph_iterations=morph_iterations)["recall"]
 
 
-def cldice_score(pred_mask, gt_mask, threshold: float = 0.5, smooth: float = 1e-6, method: str = None) -> float:
+def cldice_score(pred_mask, gt_mask, threshold: float = 0.5, smooth: float = 1e-6, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None) -> float:
     """
     Centerline Dice (clDice) for tubular and elongated structures (Shit et al., CVPR 2021).
     Evaluates topological connectivity and centerline presence inside mask volumes.
@@ -312,8 +579,28 @@ def cldice_score(pred_mask, gt_mask, threshold: float = 0.5, smooth: float = 1e-
     pred_bin = _to_2d_binary(pred_mask, threshold)
     gt_bin = _to_2d_binary(gt_mask, threshold)
 
-    pred_skel = _skeletonize(pred_bin, method=method)
-    gt_skel = _skeletonize(gt_bin, method=method)
+    pred_skel = _skeletonize(
+        pred_bin,
+        method=method,
+        prune_spurs=prune_spurs,
+        max_spur_len=max_spur_len,
+        morph_open=morph_open,
+        open_kernel_size=open_kernel_size,
+        morph_op=morph_op,
+        morph_kernel_size=morph_kernel_size,
+        morph_iterations=morph_iterations,
+    )
+    gt_skel = _skeletonize(
+        gt_bin,
+        method=method,
+        prune_spurs=prune_spurs,
+        max_spur_len=max_spur_len,
+        morph_open=morph_open,
+        open_kernel_size=open_kernel_size,
+        morph_op=morph_op,
+        morph_kernel_size=morph_kernel_size,
+        morph_iterations=morph_iterations,
+    )
 
     len_pred = pred_skel.sum()
     len_gt = gt_skel.sum()
@@ -333,9 +620,44 @@ def cldice_score(pred_mask, gt_mask, threshold: float = 0.5, smooth: float = 1e-
 
 def crack_orientation_metrics(pred_mask, gt_mask, threshold: float = 0.5, min_pixels: int = 10) -> dict:
     """
-    Calculates Mean Angular Error (MAE in degrees) and Orientation Classification Agreement
-    between predicted cracks and ground truth cracks.
+    Calculates Mean Angular Error (MAE in degrees), individual crack orientations,
+    and Orientation Classification Agreement between predicted cracks and ground truth cracks.
+
+    Returns:
+        dict containing:
+            - 'mae_deg': Mean Angular Error in degrees [0, 90] across matched crack pairs
+            - 'category_agreement': Classification agreement ratio (horizontal / vertical / inclined)
+            - 'n_matched': Number of matched crack pairs
+            - 'gt_angle_deg': Dominant Ground Truth crack angle in degrees [0, 180) (or None)
+            - 'gt_category': Dominant Ground Truth classification ('horizontal', 'vertical', 'inclined')
+            - 'pred_angle_deg': Dominant Predicted crack angle in degrees [0, 180) (or None)
+            - 'pred_category': Dominant Predicted classification ('horizontal', 'vertical', 'inclined')
+            - 'gt_angles': List of all individual GT crack component angles
+            - 'pred_angles': List of all individual Predicted crack component angles
+            - 'matched_pairs': List of matched crack pair details
     """
+    def _overall_angle(binary_mask):
+        pts = np.column_stack(np.where(binary_mask > 0))
+        if len(pts) < min_pixels:
+            return None, "none"
+        mean = np.mean(pts, axis=0)
+        centered = pts - mean
+        centered_t = torch.from_numpy(centered).float()
+        cov = torch.cov(centered_t.T)
+        if cov.ndim < 2 or torch.isnan(cov).any():
+            return None, "none"
+        val, vec = torch.linalg.eig(cov)
+        principal_axis = vec.real[:, torch.argmax(val.real)]
+        angle_rad = torch.atan2(principal_axis[0], principal_axis[1])
+        angle_deg = float((angle_rad.item() * 180.0 / np.pi) % 180.0)
+        if angle_deg <= 20.0 or angle_deg >= 160.0:
+            cat = "horizontal"
+        elif 70.0 <= angle_deg <= 110.0:
+            cat = "vertical"
+        else:
+            cat = "inclined"
+        return angle_deg, cat
+
     def _extract_cracks(binary_mask):
         num_labels, labels = cv2.connectedComponents((binary_mask > 0).astype(np.uint8), connectivity=8)
         cracks = []
@@ -345,13 +667,14 @@ def crack_orientation_metrics(pred_mask, gt_mask, threshold: float = 0.5, min_pi
                 continue
             mean = np.mean(pts, axis=0)
             centered = pts - mean
-            cov = np.cov(centered.T)
-            if cov.ndim < 2 or np.isnan(cov).any():
+            centered_t = torch.from_numpy(centered).float()
+            cov = torch.cov(centered_t.T)
+            if cov.ndim < 2 or torch.isnan(cov).any():
                 continue
-            eigenvalues, eigenvectors = np.linalg.eig(cov)
-            principal_axis = np.real(eigenvectors[:, np.argmax(np.real(eigenvalues))])
-            angle_rad = np.arctan2(principal_axis[0], principal_axis[1])
-            angle_deg = float((angle_rad * 180.0 / np.pi) % 180.0)
+            val, vec = torch.linalg.eig(cov)
+            principal_axis = vec.real[:, torch.argmax(val.real)]
+            angle_rad = torch.atan2(principal_axis[0], principal_axis[1])
+            angle_deg = float((angle_rad.item() * 180.0 / np.pi) % 180.0)
 
             if angle_deg <= 20.0 or angle_deg >= 160.0:
                 cat = "horizontal"
@@ -365,7 +688,10 @@ def crack_orientation_metrics(pred_mask, gt_mask, threshold: float = 0.5, min_pi
                 "center": mean,
                 "angle_deg": angle_deg,
                 "category": cat,
+                "pixel_count": len(pts),
             })
+        # Sort by pixel count descending so primary / dominant crack is first
+        cracks.sort(key=lambda c: c["pixel_count"], reverse=True)
         return cracks
 
     pred_bin = _to_2d_binary(pred_mask, threshold)
@@ -374,13 +700,48 @@ def crack_orientation_metrics(pred_mask, gt_mask, threshold: float = 0.5, min_pi
     pred_cracks = _extract_cracks(pred_bin)
     gt_cracks = _extract_cracks(gt_bin)
 
+    gt_ang = gt_cracks[0]["angle_deg"] if gt_cracks else None
+    gt_cat = gt_cracks[0]["category"] if gt_cracks else "none"
+    pred_ang = pred_cracks[0]["angle_deg"] if pred_cracks else None
+    pred_cat = pred_cracks[0]["category"] if pred_cracks else "none"
+
+    gt_overall_ang, gt_overall_cat = _overall_angle(gt_bin)
+    pred_overall_ang, pred_overall_cat = _overall_angle(pred_bin)
+
     if len(pred_cracks) == 0 and len(gt_cracks) == 0:
-        return {"mae_deg": 0.0, "category_agreement": 1.0, "n_matched": 0}
+        return {
+            "mae_deg": 0.0,
+            "category_agreement": 1.0,
+            "n_matched": 0,
+            "gt_angle_deg": None,
+            "gt_category": "none",
+            "pred_angle_deg": None,
+            "pred_category": "none",
+            "gt_overall_angle_deg": None,
+            "pred_overall_angle_deg": None,
+            "gt_angles": [],
+            "pred_angles": [],
+            "matched_pairs": [],
+        }
     if len(pred_cracks) == 0 or len(gt_cracks) == 0:
-        return {"mae_deg": 90.0, "category_agreement": 0.0, "n_matched": 0}
+        return {
+            "mae_deg": 90.0,
+            "category_agreement": 0.0,
+            "n_matched": 0,
+            "gt_angle_deg": gt_ang,
+            "gt_category": gt_cat,
+            "pred_angle_deg": pred_ang,
+            "pred_category": pred_cat,
+            "gt_overall_angle_deg": gt_overall_ang,
+            "pred_overall_angle_deg": pred_overall_ang,
+            "gt_angles": [c["angle_deg"] for c in gt_cracks],
+            "pred_angles": [c["angle_deg"] for c in pred_cracks],
+            "matched_pairs": [],
+        }
 
     angular_errors = []
     category_matches = []
+    matched_pairs = []
 
     for p_crack in pred_cracks:
         p_cen = p_crack["center"]
@@ -396,6 +757,14 @@ def crack_orientation_metrics(pred_mask, gt_mask, threshold: float = 0.5, min_pi
             err = min(diff, 180.0 - diff)
             angular_errors.append(err)
             category_matches.append(1.0 if p_crack["category"] == best_gt["category"] else 0.0)
+            matched_pairs.append({
+                "pred_angle_deg": p_crack["angle_deg"],
+                "pred_category": p_crack["category"],
+                "gt_angle_deg": best_gt["angle_deg"],
+                "gt_category": best_gt["category"],
+                "error_deg": err,
+                "distance_px": float(best_dist),
+            })
 
     mae = float(np.mean(angular_errors)) if angular_errors else 0.0
     agreement = float(np.mean(category_matches)) if category_matches else 0.0
@@ -403,6 +772,15 @@ def crack_orientation_metrics(pred_mask, gt_mask, threshold: float = 0.5, min_pi
         "mae_deg": mae,
         "category_agreement": agreement,
         "n_matched": len(angular_errors),
+        "gt_angle_deg": gt_ang,
+        "gt_category": gt_cat,
+        "pred_angle_deg": pred_ang,
+        "pred_category": pred_cat,
+        "gt_overall_angle_deg": gt_overall_ang,
+        "pred_overall_angle_deg": pred_overall_ang,
+        "gt_angles": [c["angle_deg"] for c in gt_cracks],
+        "pred_angles": [c["angle_deg"] for c in pred_cracks],
+        "matched_pairs": matched_pairs,
     }
 
 
