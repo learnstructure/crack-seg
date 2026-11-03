@@ -10,8 +10,8 @@ from crack_seg import config
 from crack_seg.data_handlers.dataset_loaders import get_train_val_test_datasets
 from crack_seg.data_handlers.transforms import train_transform, val_transform
 from crack_seg.utils.helpers import plot_loss_curve
+from crack_seg.utils.loss import get_loss
 from crack_seg.utils.metrics import (
-    DiceLoss,
     iou_score,
     dice_coefficient,
     pixel_accuracy,
@@ -27,12 +27,13 @@ if torch.cuda.is_available():
 def train_pytorch():
     """Train and validate standard PyTorch / SMP segmentation models."""
     dataset_suffix = "_".join(config.DATASETS)
-    checkpoint_stem = f"{config.MODEL_NAME}_{dataset_suffix}"
+    checkpoint_stem = f"{config.MODEL_NAME}_{dataset_suffix}_{config.LOSS}"
 
     print(f"\n==========================================")
     print(f"  Training Model: {config.MODEL_NAME.upper()}")
     print(f"  Active Datasets: {config.DATASETS}")
-    print(f"  Device: {config.DEVICE}")
+    print(f"  Loss Function:   {config.LOSS}")
+    print(f"  Device:          {config.DEVICE}")
     print(f"==========================================\n")
 
     # Build multi-dataset training and validation sets
@@ -67,8 +68,12 @@ def train_pytorch():
     model_module = importlib.import_module(f"crack_seg.models.{config.MODEL_NAME}")
     model = model_module.get_model().to(config.DEVICE)
 
-    # Loss function
-    criterion = DiceLoss() if config.LOSS == "dice" else nn.BCEWithLogitsLoss()
+    # Loss function (supports 'dice', 'focal', 'dice_focal', 'bce')
+    criterion = get_loss(
+        config.LOSS,
+        alpha=getattr(config, "FOCAL_ALPHA", 0.25),
+        gamma=getattr(config, "FOCAL_GAMMA", 2.0),
+    )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
     # Reduce learning rate when validation loss plateaus.
@@ -161,9 +166,12 @@ def train_pytorch():
             torch.save(model.state_dict(), save_path)
             print(f"Model saved to {save_path} with val loss {val_loss:.4f}")
 
-    plot_save_path = config.CHECKPOINT_DIR / f"{checkpoint_stem}_loss_curve.png"
+    # Save loss curve plots and history JSON in checkpoints/loss/
+    config.LOSS_DIR.mkdir(parents=True, exist_ok=True)
+    plot_save_path = config.LOSS_DIR / f"{checkpoint_stem}_loss_curve.png"
     plot_loss_curve(train_losses, val_losses, save_path=plot_save_path)
-    print(f"Loss curve saved to {plot_save_path}")
+    print(f"Loss curve saved to: {plot_save_path}")
+    print(f"Loss history JSON saved to: {plot_save_path.with_suffix('.json')}")
 
 
 def train_yolo_pipeline():

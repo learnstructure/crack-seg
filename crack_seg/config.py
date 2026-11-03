@@ -57,27 +57,37 @@ NUM_CLASSES = 1  # Binary segmentation
 MASK_THRESHOLD = 128  # Grayscale threshold to binarize masks
 
 # Loss and Metrics
-LOSS = "dice"  # "dice", "bce"
+# Options: "dice", "focal", "dice_focal", "bce"
+LOSS = "dice_focal"
+FOCAL_ALPHA = 0.25  # Balancing factor for positive (crack) class
+FOCAL_GAMMA = 2.0   # Focusing parameter for hard examples
 METRICS = ["iou", "dice", "accuracy", "precision", "recall", "specificity"]
 
 # Skeletonization and Centerline Evaluation Configuration
 # Options: "lee" (default, Lee's medial axis algorithm), "zhang" (Zhang-Suen thinning)
-SKELETON_METHOD = os.getenv("SKELETON_METHOD", "lee")
-CENTERLINE_TOLERANCE_PX = float(os.getenv("CENTERLINE_TOLERANCE_PX", "20.0"))
+SKELETON_METHOD = "lee"
+CENTERLINE_TOLERANCE_PX = 20.0  # Euclidean distance tolerance buffer in pixels
+
 # Morphological Spur Pruning (removes tiny side branches <= MAX_SPUR_LEN pixels)
-PRUNE_SKELETON_SPURS = os.getenv("PRUNE_SKELETON_SPURS", "False").lower() in ("true", "1", "yes")
-MAX_SPUR_LEN = int(os.getenv("MAX_SPUR_LEN", "10"))
+PRUNE_SKELETON_SPURS = False
+MAX_SPUR_LEN = 10
+
 # Morphological Mask Preprocessing before skeletonization
 # MORPH_OP: None, "open" (erode then dilate), "close" (dilate then erode), "close_open", "dilate", "erode"
-MORPH_OP = os.getenv("MORPH_OP", None)
-MORPH_KERNEL_SIZE = int(os.getenv("MORPH_KERNEL_SIZE", "3"))
-MORPH_ITERATIONS = int(os.getenv("MORPH_ITERATIONS", "1"))
+MORPH_OP = None
+MORPH_KERNEL_SIZE = 3
+MORPH_ITERATIONS = 1
+MORPH_DILATE_ITERATIONS = None  # Optional asymmetric dilation count for closing (e.g. 5)
+MORPH_ERODE_ITERATIONS = None   # Optional asymmetric erosion count for closing (e.g. 1)
+
 # Backward-compatibility aliases for Morphological Opening
-MORPH_OPEN_MASK = os.getenv("MORPH_OPEN_MASK", "False").lower() in ("true", "1", "yes")
-MORPH_OPEN_KERNEL_SIZE = int(os.getenv("MORPH_OPEN_KERNEL_SIZE", str(MORPH_KERNEL_SIZE)))
+MORPH_OPEN_MASK = False
+MORPH_OPEN_KERNEL_SIZE = 3
 
 # Checkpoints
 CHECKPOINT_DIR = BASE_DIR / "checkpoints"
 CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+LOSS_DIR = CHECKPOINT_DIR / "loss"
+LOSS_DIR.mkdir(parents=True, exist_ok=True)
 
 

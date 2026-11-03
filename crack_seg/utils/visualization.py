@@ -162,3 +162,245 @@ def compare_prediction(image_path, models, device, transform, mask_dir=None, thr
 
     plt.tight_layout()
     plt.show()
+
+
+def plot_overlay_comparison(
+    image: str | Path | Image.Image | np.ndarray,
+    overlays: dict[str, np.ndarray | Image.Image],
+    original_title: str = "Original Bridge Image",
+    suptitle: str | None = None,
+    figsize: tuple[int, int] | None = None,
+    alpha: float = 0.6,
+    color: tuple[int, int, int] = (255, 0, 0),
+    show: bool = True,
+    save_path: str | Path | None = None,
+    roi_mask: np.ndarray | None = None,
+    roi_color: tuple[int, int, int] = (0, 255, 255),
+    outline_roi_on_image: bool = False,
+):
+    """
+    Display the original image and multiple model overlays side-by-side in a single row.
+
+    Args:
+        image: Path to image, PIL Image, or RGB numpy array.
+        overlays: Dict mapping column title (e.g. 'UNet Overlay (T=1.85s)') to
+                  either a pre-computed RGB overlay or a 2D binary mask.
+                  If a 2D mask is provided, create_red_overlay is automatically applied.
+        original_title: Title for the first subplot (default: 'Original Bridge Image').
+        suptitle: Main figure title (e.g. image filename).
+        figsize: Optional (width, height) tuple for matplotlib figure.
+        alpha: Overlay alpha if mask is converted to overlay (default: 0.6).
+        color: RGB color tuple for crack overlay (default: red (255, 0, 0)).
+        show: Whether to call plt.show() (default: True).
+        save_path: Optional path to save the figure image.
+        roi_mask: Optional boolean or binary mask to outline on masks (or on image if outline_roi_on_image is True).
+        roi_color: RGB tuple for ROI outline contour (default: cyan (0, 255, 255)).
+        outline_roi_on_image: Whether to outline ROI contour on the original image (default: False).
+    """
+    if isinstance(image, (str, Path)):
+        img = Image.open(image).convert("RGB")
+    elif isinstance(image, Image.Image):
+        img = image.convert("RGB")
+    else:
+        img = Image.fromarray(np.asarray(image, dtype=np.uint8))
+
+    display_img = img
+    # Outline boundary on the base image only if explicitly requested
+    if outline_roi_on_image and roi_mask is not None:
+        import cv2
+        roi_bin = (np.asarray(roi_mask) > 0.5).astype(np.uint8)
+        contours, _ = cv2.findContours(roi_bin, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        img_arr = np.array(img).copy()
+        line_w = max(2, max(img.size) // 500)
+        cv2.drawContours(img_arr, contours, -1, roi_color, line_w)
+        display_img = Image.fromarray(img_arr)
+
+    ncols = 1 + len(overlays)
+    if figsize is None:
+        figsize = (6 * ncols, 6)
+
+    fig, axes = plt.subplots(1, ncols, figsize=figsize)
+    if ncols == 1:
+        axes = [axes]
+
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=16)
+
+    # Col 0: Original image
+    axes[0].imshow(display_img)
+    axes[0].set_title(original_title, fontsize=14)
+    axes[0].axis("off")
+
+    # Col 1..N: Model Overlays / Masks
+    for ax, (title, overlay_or_mask) in zip(axes[1:], overlays.items()):
+        overlay_arr = np.asarray(overlay_or_mask)
+        if overlay_arr.ndim == 2:
+            if "mask" in title.lower() and "overlay" not in title.lower():
+                # Display as high-contrast binary/grayscale mask
+                mask_display = (overlay_arr > 0).astype(np.uint8) * 255
+                if roi_mask is not None:
+                    import cv2
+                    roi_bin = (np.asarray(roi_mask) > 0.5).astype(np.uint8)
+                    contours, _ = cv2.findContours(roi_bin, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    mask_rgb = np.stack([mask_display] * 3, axis=-1)
+                    line_w = max(2, max(img.size) // 500)
+                    cv2.drawContours(mask_rgb, contours, -1, roi_color, line_w)
+                    ax.imshow(mask_rgb)
+                else:
+                    ax.imshow(mask_display, cmap="gray", vmin=0, vmax=255)
+            else:
+                overlay_arr = create_red_overlay(img, overlay_arr, alpha=alpha, color=color)
+                ax.imshow(overlay_arr)
+        else:
+            ax.imshow(overlay_arr)
+        ax.set_title(title, fontsize=14)
+        ax.axis("off")
+
+    plt.tight_layout()
+
+    if save_path is not None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, bbox_inches="tight", dpi=150)
+
+    if show:
+        plt.show()
+
+    return fig, axes
+
+
+def visualize_model_overlays(
+    image: str | Path | Image.Image,
+    models: dict,
+    device=None,
+    patch_size: int = 448,
+    stride: int = 224,
+    batch_size: int = 16,
+    use_amp: bool = True,
+    yolo_conf: float = 0.15,
+    alpha: float = 0.6,
+    color: tuple[int, int, int] = (255, 0, 0),
+    original_title: str = "Original Bridge Image",
+    suptitle: str | None = None,
+    figsize: tuple[int, int] | None = None,
+    save_path: str | Path | None = None,
+    show: bool = True,
+    roi_mask: np.ndarray | None = None,
+    roi_color: tuple[int, int, int] = (0, 255, 255),
+    ground_truth_mask: np.ndarray | Image.Image | None = None,
+    gt_title: str = "Ground Truth Mask",
+    outline_roi_on_image: bool = False,
+) -> dict:
+    """
+    Run inference across multiple models (UNet, SegFormer, YOLO) on an image
+    using patched inference for PyTorch models and full-resolution YOLO inference,
+    compute wall-clock timing, create red overlays, and plot them side by side.
+    Optionally restrict predictions to an ROI mask (e.g. Column) and include Ground Truth Mask.
+
+    Args:
+        image: Image file path or PIL Image.
+        models: Dict mapping display name (e.g. 'UNet', 'SegFormer (Dice+Focal)', 'YOLO-seg')
+                to model object, or tuple (model_type, model_object).
+        device: Device for PyTorch inference (defaults to config.DEVICE).
+        patch_size: Sliding window patch size (default: 448).
+        stride: Stride between patches (default: 224).
+        batch_size: GPU batch size for patches (default: 16).
+        use_amp: Automatic Mixed Precision (default: True).
+        yolo_conf: YOLO confidence threshold (default: 0.15).
+        alpha: Overlay blending opacity (default: 0.6).
+        color: Overlay RGB color (default: (255, 0, 0)).
+        original_title: Title for original image column.
+        suptitle: Main title for figure (defaults to image filename if path is given).
+        figsize: Matplotlib figure size tuple.
+        save_path: Optional path to save the generated figure.
+        show: Whether to display figure with plt.show().
+        roi_mask: Optional boolean mask of shape (H, W) to isolate foreground ROI.
+        roi_color: RGB outline color for ROI boundary.
+        ground_truth_mask: Optional ground truth mask array or PIL Image.
+        gt_title: Column title for ground truth mask (default: 'Ground Truth Mask').
+        outline_roi_on_image: Whether to outline ROI contour on original bridge image (default: False).
+
+    Returns:
+        dict: {'predictions': dict, 'timings': dict, 'overlays': dict, 'fig': fig, 'axes': axes}
+    """
+    from crack_seg.utils.helpers import predict_mask
+
+    if device is None:
+        from crack_seg.config import DEVICE
+        device = DEVICE
+
+    if isinstance(image, (str, Path)):
+        img_path = Path(image)
+        bridge_img = Image.open(img_path).convert("RGB")
+        if suptitle is None:
+            suptitle = img_path.name
+    else:
+        bridge_img = image.convert("RGB")
+
+    predictions = {}
+    timings = {}
+    overlays = {}
+
+    roi_arr = (np.asarray(roi_mask) > 0.5) if roi_mask is not None else None
+
+    # Add ground truth mask as first comparison panel if provided
+    if ground_truth_mask is not None:
+        gt_arr = np.asarray(ground_truth_mask) > 0
+        if roi_arr is not None:
+            gt_arr = gt_arr & roi_arr
+        overlays[gt_title] = gt_arr
+
+    for name, model_spec in models.items():
+        if isinstance(model_spec, tuple) and len(model_spec) == 2:
+            model_type, model = model_spec
+        else:
+            model_type, model = None, model_spec
+
+        pred_mask, elapsed = predict_mask(
+            model=model,
+            image=image,
+            device=device,
+            model_type=model_type,
+            use_patches=True,
+            patch_size=patch_size,
+            stride=stride,
+            batch_size=batch_size,
+            use_amp=use_amp,
+            yolo_conf=yolo_conf,
+        )
+
+        # Restrict prediction to ROI mask if provided
+        if roi_arr is not None:
+            pred_mask = pred_mask & roi_arr
+
+        overlay = create_red_overlay(bridge_img, pred_mask, alpha=alpha, color=color)
+
+        predictions[name] = pred_mask
+        timings[name] = elapsed
+        overlays[f"{name} Overlay (T={elapsed:.2f}s)"] = overlay
+
+    fig, axes = plot_overlay_comparison(
+        image=bridge_img,
+        overlays=overlays,
+        original_title=original_title,
+        suptitle=suptitle,
+        figsize=figsize,
+        alpha=alpha,
+        color=color,
+        show=show,
+        save_path=save_path,
+        roi_mask=roi_arr,
+        roi_color=roi_color,
+        outline_roi_on_image=outline_roi_on_image,
+    )
+
+    return {
+        "predictions": predictions,
+        "timings": timings,
+        "overlays": overlays,
+        "fig": fig,
+        "axes": axes,
+    }
+
+
+

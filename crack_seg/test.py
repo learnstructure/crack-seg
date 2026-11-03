@@ -131,7 +131,11 @@ def main():
     else:
         model_name = config.MODEL_NAME
         dataset_suffix = "_".join(config.DATASETS)
-        checkpoint_path = config.CHECKPOINT_DIR / f"{model_name}_{dataset_suffix}.pth"
+        loss_ckpt = config.CHECKPOINT_DIR / f"{model_name}_{dataset_suffix}_{config.LOSS}.pth"
+        if loss_ckpt.exists():
+            checkpoint_path = loss_ckpt
+        else:
+            checkpoint_path = config.CHECKPOINT_DIR / f"{model_name}_{dataset_suffix}.pth"
         print(f"Loading model '{model_name}' from default checkpoint: {checkpoint_path}")
 
         model_module = importlib.import_module(f"crack_seg.models.{model_name}")

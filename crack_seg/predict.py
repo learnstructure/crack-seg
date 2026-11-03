@@ -16,7 +16,10 @@ from crack_seg.data_handlers.transforms import (
 
 
 def predict(image_path, model, device):
-    image = Image.open(image_path).convert("RGB")
+    if isinstance(image_path, Image.Image):
+        image = image_path.convert("RGB")
+    else:
+        image = Image.open(image_path).convert("RGB")
     input_tensor = pred_transform(image).unsqueeze(0).to(device)
     with torch.no_grad():
         output = model(input_tensor)
@@ -24,17 +27,32 @@ def predict(image_path, model, device):
     return pred
 
 
-def predict_with_patches(image_path, model, device, patch_size=448, stride=224):
+def predict_with_patches(
+    image_path,
+    model,
+    device,
+    patch_size: int = 448,
+    stride: int = 224,
+    batch_size: int = 16,
+    use_amp: bool = True,
+):
     """
     Predicts segmentation masks on large images by dividing them into overlapping patches.
+    Batches patches together to leverage GPU parallelism and Tensor Cores (AMP).
     """
-    image = Image.open(image_path).convert("RGB")
+    if isinstance(image_path, Image.Image):
+        image = image_path.convert("RGB")
+    else:
+        image = Image.open(image_path).convert("RGB")
     image_width, image_height = image.size
 
     input_tensor = original_size_transform(image).unsqueeze(0).to(device)
 
     preds_sum = torch.zeros((1, 1, image_height, image_width), device=device)
     overlap_count = torch.zeros((1, 1, image_height, image_width), device=device)
+
+    patches = []
+    coords = []
 
     for y in range(0, image_height, stride):
         for x in range(0, image_width, stride):
@@ -50,12 +68,25 @@ def predict_with_patches(image_path, model, device, patch_size=448, stride=224):
                     patch, (0, pad_w, 0, pad_h), mode="constant", value=0
                 )
 
-            with torch.no_grad():
-                patch_pred = model(patch)
-                patch_pred = torch.sigmoid(patch_pred)
+            patches.append(patch.squeeze(0))
+            coords.append((y, y_end, x, x_end))
 
-            preds_sum[:, :, y:y_end, x:x_end] += patch_pred[:, :, : y_end - y, : x_end - x]
-            overlap_count[:, :, y:y_end, x:x_end] += 1
+    device_type = "cuda" if "cuda" in str(device) else "cpu"
+    amp_enabled = use_amp and (device_type == "cuda")
+
+    model.eval()
+    with torch.inference_mode():
+        for i in range(0, len(patches), batch_size):
+            batch_patches = torch.stack(patches[i : i + batch_size], dim=0)
+            with torch.amp.autocast(device_type=device_type, enabled=amp_enabled):
+                batch_pred = model(batch_patches)
+                batch_pred = torch.sigmoid(batch_pred)
+
+            for j, (y, y_end, x, x_end) in enumerate(coords[i : i + batch_size]):
+                preds_sum[:, :, y:y_end, x:x_end] += batch_pred[
+                    j : j + 1, :, : y_end - y, : x_end - x
+                ]
+                overlap_count[:, :, y:y_end, x:x_end] += 1
 
     final_pred = preds_sum / overlap_count
     final_pred = final_pred.cpu().numpy().squeeze()
@@ -93,6 +124,17 @@ def main():
         type=int,
         default=224,
         help="Stride for patched inference.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=16,
+        help="Batch size of patches processed concurrently on the GPU (default: 16).",
+    )
+    parser.add_argument(
+        "--no-amp",
+        action="store_true",
+        help="Disable automatic mixed precision (AMP) during patched inference.",
     )
     parser.add_argument(
         "--output",
@@ -140,7 +182,13 @@ def main():
 
     if args.use_patches:
         pred = predict_with_patches(
-            args.image, model, config.DEVICE, args.patch_size, args.stride
+            args.image,
+            model,
+            config.DEVICE,
+            patch_size=args.patch_size,
+            stride=args.stride,
+            batch_size=args.batch_size,
+            use_amp=not args.no_amp,
         )
     else:
         pred = predict(args.image, model, config.DEVICE)

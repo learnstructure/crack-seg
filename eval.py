@@ -90,9 +90,23 @@ parser.add_argument(
 )
 parser.add_argument(
     "--morph-iterations",
-    type=int,
+    type=str,
     default=getattr(config, "MORPH_ITERATIONS", 1),
-    help="Number of morphological iterations (e.g. dilate N times then erode N times for closing, default 1).",
+    help="Number of morphological iterations (e.g. 1, 2, or '5,1' for dilate 5, erode 1).",
+)
+parser.add_argument(
+    "--morph-dilate-iters",
+    "--dilate-iterations",
+    type=int,
+    default=getattr(config, "MORPH_DILATE_ITERATIONS", None),
+    help="Number of dilation iterations for morphological closing (default: same as morph_iterations).",
+)
+parser.add_argument(
+    "--morph-erode-iters",
+    "--erode-iterations",
+    type=int,
+    default=getattr(config, "MORPH_ERODE_ITERATIONS", None),
+    help="Number of erosion iterations for morphological closing (default: same as morph_iterations).",
 )
 cli_args, _ = parser.parse_known_args()
 config.SKELETON_METHOD = cli_args.skeleton_method
@@ -104,6 +118,8 @@ config.MORPH_OPEN_KERNEL_SIZE = cli_args.open_kernel_size
 config.MORPH_OP = cli_args.morph_op
 config.MORPH_KERNEL_SIZE = cli_args.morph_kernel_size
 config.MORPH_ITERATIONS = cli_args.morph_iterations
+config.MORPH_DILATE_ITERATIONS = cli_args.morph_dilate_iters
+config.MORPH_ERODE_ITERATIONS = cli_args.morph_erode_iters
 
 # ==============================================================================
 # 0. Environment Info
@@ -114,7 +130,12 @@ print("Device (config)  :", config.DEVICE)
 print(f"Skeleton Method  : {config.SKELETON_METHOD}")
 print(f"Centerline Tol   : ±{config.CENTERLINE_TOLERANCE_PX} px")
 print(f"Prune Spurs      : {config.PRUNE_SKELETON_SPURS} (max len: {config.MAX_SPUR_LEN} px)")
-print(f"Morph Op         : {config.MORPH_OP} (ksize: {config.MORPH_KERNEL_SIZE} px, iters: {config.MORPH_ITERATIONS})")
+if config.MORPH_DILATE_ITERATIONS is not None or config.MORPH_ERODE_ITERATIONS is not None:
+    d_i = config.MORPH_DILATE_ITERATIONS if config.MORPH_DILATE_ITERATIONS is not None else config.MORPH_ITERATIONS
+    e_i = config.MORPH_ERODE_ITERATIONS if config.MORPH_ERODE_ITERATIONS is not None else config.MORPH_ITERATIONS
+    print(f"Morph Op         : {config.MORPH_OP} (ksize: {config.MORPH_KERNEL_SIZE} px, dilate={d_i}, erode={e_i})")
+else:
+    print(f"Morph Op         : {config.MORPH_OP} (ksize: {config.MORPH_KERNEL_SIZE} px, iters: {config.MORPH_ITERATIONS})")
 print()
 
 # ==============================================================================
@@ -152,7 +173,36 @@ for model_name, info in MODELS_TO_EVALUATE.items():
         active_models[model_name] = info
         print(f"  ✓  Found  : {model_name}  ({ckpt_path.name})")
     else:
-        print(f"  ✗  Missing: {model_name}  ({ckpt_path.name}) — skipping")
+        # Check if a loss-suffixed version exists (e.g. _dice.pth, _focal.pth, _dice_focal.pth)
+        stem = ckpt_path.stem
+        found_loss_ckpt = None
+        for suffix in [f"_{config.LOSS}", "_focal", "_dice_focal", "_dice"]:
+            candidate = ckpt_path.parent / f"{stem}{suffix}{ckpt_path.suffix}"
+            if candidate.exists():
+                found_loss_ckpt = candidate
+                break
+        if found_loss_ckpt is not None:
+            active_models[f"{model_name} ({found_loss_ckpt.stem.split('_')[-1]})"] = {
+                'type': info['type'],
+                'path': found_loss_ckpt,
+            }
+            print(f"  ✓  Found  : {model_name}  ({found_loss_ckpt.name})")
+        else:
+            print(f"  ✗  Missing: {model_name}  ({ckpt_path.name}) — skipping")
+
+# Auto-discover any additional trained PyTorch models (e.g. segformer or new loss variants)
+for pt_file in sorted(config.CHECKPOINT_DIR.glob("*.pth")):
+    if any(m['path'].resolve() == pt_file.resolve() for m in active_models.values()):
+        continue
+    stem_lower = pt_file.stem.lower()
+    inferred_type = None
+    for arch in ["segformer", "deeplabv3plus", "deeplabv3", "unetplusplus", "unet", "segnet", "fpn", "linknet", "pspnet"]:
+        if stem_lower.startswith(arch):
+            inferred_type = arch
+            break
+    if inferred_type:
+        active_models[pt_file.stem] = {'type': inferred_type, 'path': pt_file}
+        print(f"  ✓  Discovered: {pt_file.stem}  ({pt_file.name})")
 
 print()
 if not active_models:

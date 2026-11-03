@@ -44,6 +44,8 @@ def pixel_accuracy(pred, target):
 def precision_score(pred, target):
     """Calculates precision."""
     tp, fp, _, _, smooth = _get_stats(pred, target)
+    if (tp + fp) == 0:
+        return torch.tensor(0.0, device=tp.device) if isinstance(tp, torch.Tensor) else 0.0
     return (tp + smooth) / (tp + fp + smooth)
 
 
@@ -161,6 +163,8 @@ def _skeletonize(
     morph_op: str = None,
     morph_kernel_size: int = None,
     morph_iterations: int = None,
+    dilate_iterations: int = None,
+    erode_iterations: int = None,
 ) -> np.ndarray:
     """
     Skeletonize a binary mask to a 1-pixel-wide centerline using scikit-image,
@@ -181,7 +185,7 @@ def _skeletonize(
         open_kernel_size (int, optional): Legacy alias for morph_kernel_size.
         morph_op (str, optional): Morphological operation applied to the binary mask before thinning:
             - 'open' (or 'opening'): Erosion followed by Dilation (smooths jagged edges & removes false branch spurs).
-            - 'close' (or 'closing'): Dilation followed by Erosion (bridges gaps & reconnects broken crack segments).
+            - 'close' (or 'closing', 'dilate_erode'): Dilation followed by Erosion (bridges gaps & reconnects broken crack segments).
             - 'close_open': Closing then Opening (bridges gaps, then removes boundary bumps).
             - 'open_close': Opening then Closing.
             - 'dilate': Pure dilation.
@@ -189,8 +193,10 @@ def _skeletonize(
             - None: No morphological preprocessing.
             If None, checks config.MORPH_OP and config.MORPH_OPEN_MASK.
         morph_kernel_size (int, optional): Structuring element kernel size in pixels (default: 3).
-        morph_iterations (int, optional): Number of times to apply the morphological operation (default: 1).
-            For closing: dilates N times then erodes N times.
+        morph_iterations (int or str or tuple, optional): Number of times to apply the morphological operation (default: 1).
+            For closing: dilates N times then erodes N times. Can also be a string "5,1" or tuple (5, 1) for asymmetric dilation/erosion.
+        dilate_iterations (int, optional): Number of dilation iterations (overrides morph_iterations for dilation, e.g. 5).
+        erode_iterations (int, optional): Number of erosion iterations (overrides morph_iterations for erosion, e.g. 1).
 
     Returns:
         np.ndarray: 2-D uint8 array with 1 for centerline and 0 for background.
@@ -218,6 +224,10 @@ def _skeletonize(
             morph_kernel_size = getattr(config, "MORPH_KERNEL_SIZE", open_kernel_size)
         if morph_iterations is None:
             morph_iterations = getattr(config, "MORPH_ITERATIONS", 1)
+        if dilate_iterations is None:
+            dilate_iterations = getattr(config, "MORPH_DILATE_ITERATIONS", None)
+        if erode_iterations is None:
+            erode_iterations = getattr(config, "MORPH_ERODE_ITERATIONS", None)
     except (ImportError, AttributeError):
         if prune_spurs is None:
             prune_spurs = False
@@ -233,10 +243,40 @@ def _skeletonize(
             morph_kernel_size = open_kernel_size
         if morph_iterations is None:
             morph_iterations = 1
+        if dilate_iterations is None:
+            dilate_iterations = None
+        if erode_iterations is None:
+            erode_iterations = None
+
+    # Parse comma-separated string or tuple/list for asymmetric iterations (e.g., "5,1" or (5, 1))
+    if isinstance(morph_iterations, (list, tuple)) and len(morph_iterations) == 2:
+        if dilate_iterations is None:
+            dilate_iterations = int(morph_iterations[0])
+        if erode_iterations is None:
+            erode_iterations = int(morph_iterations[1])
+        morph_iterations = dilate_iterations
+    elif isinstance(morph_iterations, str) and ("," in morph_iterations or ":" in morph_iterations):
+        sep = "," if "," in morph_iterations else ":"
+        parts = morph_iterations.split(sep)
+        if len(parts) == 2:
+            if dilate_iterations is None:
+                dilate_iterations = int(parts[0].strip())
+            if erode_iterations is None:
+                erode_iterations = int(parts[1].strip())
+            morph_iterations = dilate_iterations
+    elif isinstance(morph_iterations, str):
+        try:
+            morph_iterations = int(morph_iterations.strip())
+        except ValueError:
+            morph_iterations = 1
 
     # Backward compatibility with morph_open boolean flag
     if morph_op is None and morph_open:
         morph_op = "open"
+
+    # If dilate_iterations or erode_iterations are specified without morph_op, default to "close"
+    if morph_op is None and (dilate_iterations is not None or erode_iterations is not None):
+        morph_op = "close"
 
     if morph_kernel_size is None:
         morph_kernel_size = open_kernel_size if open_kernel_size is not None else 3
@@ -264,9 +304,18 @@ def _skeletonize(
         if op_lower in ("open", "opening"):
             # Erosion followed by Dilation (Option A: removes false branch spurs)
             processed = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, kernel, iterations=iters)
-        elif op_lower in ("close", "closing"):
-            # Dilation followed by Erosion (Morphological Closing: bridges gaps / connects segments)
-            processed = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel, iterations=iters)
+        elif op_lower in ("close", "closing", "dilate_erode", "close_asym"):
+            # Dilation followed by Erosion (Morphological Closing / Asymmetric Dilation-Erosion)
+            if dilate_iterations is not None or erode_iterations is not None:
+                d_iters = max(0, int(dilate_iterations if dilate_iterations is not None else iters))
+                e_iters = max(0, int(erode_iterations if erode_iterations is not None else iters))
+                processed = mask_u8
+                if d_iters > 0:
+                    processed = cv2.dilate(processed, kernel, iterations=d_iters)
+                if e_iters > 0:
+                    processed = cv2.erode(processed, kernel, iterations=e_iters)
+            else:
+                processed = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel, iterations=iters)
         elif op_lower in ("close_open", "closing_opening"):
             closed = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel, iterations=iters)
             processed = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel, iterations=iters)
@@ -274,12 +323,14 @@ def _skeletonize(
             opened = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, kernel, iterations=iters)
             processed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel, iterations=iters)
         elif op_lower == "dilate":
-            processed = cv2.dilate(mask_u8, kernel, iterations=iters)
+            d_iters = max(0, int(dilate_iterations if dilate_iterations is not None else iters))
+            processed = cv2.dilate(mask_u8, kernel, iterations=d_iters)
         elif op_lower == "erode":
-            processed = cv2.erode(mask_u8, kernel, iterations=iters)
+            e_iters = max(0, int(erode_iterations if erode_iterations is not None else iters))
+            processed = cv2.erode(mask_u8, kernel, iterations=e_iters)
         else:
             raise ValueError(
-                f"Unknown morph_op: '{morph_op}'. Supported: 'open', 'close', 'close_open', 'open_close', 'dilate', 'erode'."
+                f"Unknown morph_op: '{morph_op}'. Supported: 'open', 'close', 'dilate_erode', 'close_open', 'open_close', 'dilate', 'erode'."
             )
 
         if processed.max() > 0 or mask_u8.max() == 0:
@@ -312,6 +363,8 @@ def crack_length_in_pixels(
     morph_op: str = None,
     morph_kernel_size: int = None,
     morph_iterations: int = None,
+    dilate_iterations: int = None,
+    erode_iterations: int = None,
 ) -> int:
     """
     Calculate the total length of cracks in pixels by computing
@@ -328,6 +381,8 @@ def crack_length_in_pixels(
         morph_op=morph_op,
         morph_kernel_size=morph_kernel_size,
         morph_iterations=morph_iterations,
+        dilate_iterations=dilate_iterations,
+        erode_iterations=erode_iterations,
     )
     return int(skel.sum())
 
@@ -346,6 +401,8 @@ def skeleton_iou_score(
     morph_op: str = None,
     morph_kernel_size: int = None,
     morph_iterations: int = None,
+    dilate_iterations: int = None,
+    erode_iterations: int = None,
 ) -> float:
     """
     Skeleton-based IoU metric with optional tolerance dilation.
@@ -378,6 +435,8 @@ def skeleton_iou_score(
         morph_op=morph_op,
         morph_kernel_size=morph_kernel_size,
         morph_iterations=morph_iterations,
+        dilate_iterations=dilate_iterations,
+        erode_iterations=erode_iterations,
     )
     gt_skel = _skeletonize(
         gt_bin,
@@ -389,6 +448,8 @@ def skeleton_iou_score(
         morph_op=morph_op,
         morph_kernel_size=morph_kernel_size,
         morph_iterations=morph_iterations,
+        dilate_iterations=dilate_iterations,
+        erode_iterations=erode_iterations,
     )
 
     len_pred = pred_skel.sum()
@@ -432,6 +493,8 @@ def centerline_buffer_metrics(
     morph_op: str = None,
     morph_kernel_size: int = None,
     morph_iterations: int = None,
+    dilate_iterations: int = None,
+    erode_iterations: int = None,
 ) -> dict:
     """
     Computes crack lengths (in pixels), length of predicted cracks within the
@@ -481,6 +544,8 @@ def centerline_buffer_metrics(
         morph_op=morph_op,
         morph_kernel_size=morph_kernel_size,
         morph_iterations=morph_iterations,
+        dilate_iterations=dilate_iterations,
+        erode_iterations=erode_iterations,
     )
     gt_skel = _skeletonize(
         gt_bin,
@@ -492,6 +557,8 @@ def centerline_buffer_metrics(
         morph_op=morph_op,
         morph_kernel_size=morph_kernel_size,
         morph_iterations=morph_iterations,
+        dilate_iterations=dilate_iterations,
+        erode_iterations=erode_iterations,
     )
 
     len_pred = int(pred_skel.sum())
@@ -551,27 +618,27 @@ def centerline_buffer_metrics(
     }
 
 
-def centerline_f1(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None) -> float:
+def centerline_f1(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None, dilate_iterations: int = None, erode_iterations: int = None) -> float:
     """Convenience wrapper returning Centerline F1 score at given tolerance."""
-    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method, prune_spurs=prune_spurs, max_spur_len=max_spur_len, morph_open=morph_open, open_kernel_size=open_kernel_size, morph_op=morph_op, morph_kernel_size=morph_kernel_size, morph_iterations=morph_iterations)["f1_score"]
+    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method, prune_spurs=prune_spurs, max_spur_len=max_spur_len, morph_open=morph_open, open_kernel_size=open_kernel_size, morph_op=morph_op, morph_kernel_size=morph_kernel_size, morph_iterations=morph_iterations, dilate_iterations=dilate_iterations, erode_iterations=erode_iterations)["f1_score"]
 
 
-def centerline_iou(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None) -> float:
+def centerline_iou(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None, dilate_iterations: int = None, erode_iterations: int = None) -> float:
     """Convenience wrapper returning Centerline IoU (length Jaccard) at given tolerance."""
-    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method, prune_spurs=prune_spurs, max_spur_len=max_spur_len, morph_open=morph_open, open_kernel_size=open_kernel_size, morph_op=morph_op, morph_kernel_size=morph_kernel_size, morph_iterations=morph_iterations)["iou"]
+    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method, prune_spurs=prune_spurs, max_spur_len=max_spur_len, morph_open=morph_open, open_kernel_size=open_kernel_size, morph_op=morph_op, morph_kernel_size=morph_kernel_size, morph_iterations=morph_iterations, dilate_iterations=dilate_iterations, erode_iterations=erode_iterations)["iou"]
 
 
-def centerline_precision(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None) -> float:
+def centerline_precision(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None, dilate_iterations: int = None, erode_iterations: int = None) -> float:
     """Convenience wrapper returning Centerline Precision at given tolerance."""
-    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method, prune_spurs=prune_spurs, max_spur_len=max_spur_len, morph_open=morph_open, open_kernel_size=open_kernel_size, morph_op=morph_op, morph_kernel_size=morph_kernel_size, morph_iterations=morph_iterations)["precision"]
+    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method, prune_spurs=prune_spurs, max_spur_len=max_spur_len, morph_open=morph_open, open_kernel_size=open_kernel_size, morph_op=morph_op, morph_kernel_size=morph_kernel_size, morph_iterations=morph_iterations, dilate_iterations=dilate_iterations, erode_iterations=erode_iterations)["precision"]
 
 
-def centerline_recall(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None) -> float:
+def centerline_recall(pred_mask, gt_mask, threshold: float = 0.5, tolerance_px: float = None, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None, dilate_iterations: int = None, erode_iterations: int = None) -> float:
     """Convenience wrapper returning Centerline Recall at given tolerance."""
-    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method, prune_spurs=prune_spurs, max_spur_len=max_spur_len, morph_open=morph_open, open_kernel_size=open_kernel_size, morph_op=morph_op, morph_kernel_size=morph_kernel_size, morph_iterations=morph_iterations)["recall"]
+    return centerline_buffer_metrics(pred_mask, gt_mask, threshold, tolerance_px, method=method, prune_spurs=prune_spurs, max_spur_len=max_spur_len, morph_open=morph_open, open_kernel_size=open_kernel_size, morph_op=morph_op, morph_kernel_size=morph_kernel_size, morph_iterations=morph_iterations, dilate_iterations=dilate_iterations, erode_iterations=erode_iterations)["recall"]
 
 
-def cldice_score(pred_mask, gt_mask, threshold: float = 0.5, smooth: float = 1e-6, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None) -> float:
+def cldice_score(pred_mask, gt_mask, threshold: float = 0.5, smooth: float = 1e-6, method: str = None, prune_spurs: bool = None, max_spur_len: int = None, morph_open: bool = None, open_kernel_size: int = None, morph_op: str = None, morph_kernel_size: int = None, morph_iterations: int = None, dilate_iterations: int = None, erode_iterations: int = None) -> float:
     """
     Centerline Dice (clDice) for tubular and elongated structures (Shit et al., CVPR 2021).
     Evaluates topological connectivity and centerline presence inside mask volumes.
@@ -589,6 +656,8 @@ def cldice_score(pred_mask, gt_mask, threshold: float = 0.5, smooth: float = 1e-
         morph_op=morph_op,
         morph_kernel_size=morph_kernel_size,
         morph_iterations=morph_iterations,
+        dilate_iterations=dilate_iterations,
+        erode_iterations=erode_iterations,
     )
     gt_skel = _skeletonize(
         gt_bin,
@@ -600,6 +669,8 @@ def cldice_score(pred_mask, gt_mask, threshold: float = 0.5, smooth: float = 1e-
         morph_op=morph_op,
         morph_kernel_size=morph_kernel_size,
         morph_iterations=morph_iterations,
+        dilate_iterations=dilate_iterations,
+        erode_iterations=erode_iterations,
     )
 
     len_pred = pred_skel.sum()
@@ -789,21 +860,5 @@ def crack_orientation_mae(pred_mask, gt_mask, threshold: float = 0.5, min_pixels
     return crack_orientation_metrics(pred_mask, gt_mask, threshold, min_pixels)["mae_deg"]
 
 
-# --- Loss Functions ---
-class DiceLoss(torch.nn.Module):
-    def __init__(self, smooth=1e-6):
-        super().__init__()
-        self.smooth = smooth
-
-    def forward(self, logits, targets):
-        """
-        Calculates Dice loss.
-        Expects logits (before sigmoid) and binary targets.
-        """
-        preds = torch.sigmoid(logits)
-        dims = (1, 2, 3)  # batch-wise computation
-        intersection = (preds * targets).sum(dim=dims)
-        dice_score = (2. * intersection + self.smooth) / (
-            preds.sum(dim=dims) + targets.sum(dim=dims) + self.smooth
-        )
-        return 1. - dice_score.mean()
+# --- Loss Functions (Defined in crack_seg.utils.loss) ---
+from crack_seg.utils.loss import DiceLoss, FocalLoss, DiceFocalLoss, get_loss

@@ -77,7 +77,8 @@ crack-segmentation/
         │   └── yolo_seg.py               # Ultralytics YOLO segmentation wrapper
         └── utils/
             ├── helpers.py                # Loss plotting & general utilities
-            ├── metrics.py                # Loss functions & evaluation metrics
+            ├── loss.py                   # Loss functions (DiceLoss, FocalLoss, DiceFocalLoss)
+            ├── metrics.py                # Evaluation metrics & topological connectivity
             ├── post_processing.py        # Crack length/width estimation
             └── visualization.py          # Mask overlays & visual diagnostics
 ```
@@ -96,8 +97,8 @@ crack-segmentation/
 git clone <repository-url>
 cd crack-segmentation/crack-seg
 
-# Activate your Conda environment (example: structeng or crack-seg)
-conda activate structeng
+# Activate your Conda environment (example: computerVision or crack-seg)
+conda activate computerVision
 
 # Install crack_seg in editable mode with YOLO support
 pip install -e ".[yolo]"
@@ -140,7 +141,12 @@ EPOCHS = 50
 LEARNING_RATE = 1e-4
 IMG_SIZE = (448, 448)
 
-# Skeletonization and Centerline Evaluation Configuration
+# Loss configuration
+# Options: "dice", "focal", "dice_focal", "bce"
+LOSS = "dice"
+FOCAL_ALPHA = 0.25             # Weighting factor for positive (crack) class
+FOCAL_GAMMA = 2.0              # Focusing parameter down-weighting easy background pixels
+
 # Options: "lee" (default, Lee's medial axis algorithm), "zhang" (Zhang-Suen thinning)
 SKELETON_METHOD = "lee"
 CENTERLINE_TOLERANCE_PX = 20.0  # Euclidean distance tolerance buffer in pixels
@@ -184,8 +190,8 @@ Set `MODEL_NAME = "unet"` (or any SMP model) in `config.py`, then run:
 ```bash
 python -m crack_seg.train
 ```
-- Trains with the configured loss (`dice` or `bce`), validates each epoch, and saves the selected checkpoint to `checkpoints/{MODEL_NAME}_{DATASET}.pth`.
-- Generates a training and validation loss curve at `checkpoints/{MODEL_NAME}_{DATASET}_loss_curve.png`.
+- Trains with the configured loss (`dice`, `focal`, `dice_focal`, or `bce`), validates each epoch, and saves the best checkpoint to `checkpoints/{MODEL_NAME}_{DATASETS}_{LOSS}.pth`.
+- Generates a training and validation loss curve and JSON history at `checkpoints/loss/{MODEL_NAME}_{DATASETS}_{LOSS}_loss_curve.png` and `.json`.
 
 #### B. Training YOLO Segmentation Models
 Set `MODEL_NAME = "yolo_seg"` in `config.py`, then run:
